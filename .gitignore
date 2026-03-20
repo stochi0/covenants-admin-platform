@@ -1,5 +1,24 @@
-node_modules
-dist
+!**/glob-import/dir/node_modules
 .DS_Store
+.idea
+.pnpm-store
+*.cpuprofile
+*.local
+*.log
+/.vscode/
+/docs/.vitepress/cache
+/docs/.vitepress/.temp
+/packages/vite/LICENSE
+dist
+dist-ssr
+explorations
+node_modules
+playground-temp
+temp
+TODOs.md
+.eslintcache
 
-.env*
+
+.cursor
+.env
+wheat
