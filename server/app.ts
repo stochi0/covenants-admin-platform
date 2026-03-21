@@ -20,7 +20,7 @@ import { supabase } from "./supabase.js";
 dotenv.config();
 
 export const app = express();
-const allowedAdminRoles = parseAllowedRoles(process.env.ADMIN_AUTH_ROLES ?? "admin");
+const allowedAdminRoles = new Set(["admin"]);
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
@@ -161,7 +161,7 @@ async function authenticateRequest(req: Request, res: Response, next: NextFuncti
 
     req.authUser = await getAuthorizedUserById(user.id);
 
-    if (!allowedAdminRoles.has(req.authUser.role.toLowerCase())) {
+    if (!allowedAdminRoles.has(req.authUser.role)) {
       res.status(403).json({ error: "Your account does not have an admin role for this platform." });
       return;
     }
@@ -185,15 +185,6 @@ function getBearerToken(req: Request) {
   }
 
   return token;
-}
-
-function parseAllowedRoles(value: string) {
-  return new Set(
-    value
-      .split(",")
-      .map((role) => role.trim().toLowerCase())
-      .filter(Boolean)
-  );
 }
 
 declare global {
