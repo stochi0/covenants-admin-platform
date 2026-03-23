@@ -457,10 +457,6 @@ button:disabled {
   overflow: auto;
 }
 
-.import-edit-panel {
-  margin-top: 16px;
-}
-
 table {
   width: 100%;
   border-collapse: collapse;

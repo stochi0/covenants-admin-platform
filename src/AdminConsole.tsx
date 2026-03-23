@@ -23,6 +23,9 @@ interface EditorState {
 
 interface ImportState {
   fileName: string;
+  sheetNames: string[];
+  selectedSheetName: string;
+  rowsBySheet: Record<string, RowRecord[]>;
   rows: RowRecord[];
 }
 
@@ -295,7 +298,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     setImportEditor(null);
   }
 
-  function handleDeleteImportRow(rowIndex: number) {
+  function handleImportSheetChange(sheetName: string) {
     setImportState((current) => {
       if (!current) {
         return current;
@@ -303,7 +306,32 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
       return {
         ...current,
-        rows: current.rows.filter((_, index) => index !== rowIndex)
+        selectedSheetName: sheetName,
+        rows: current.rowsBySheet[sheetName] ?? []
+      };
+    });
+    setImportEditor(null);
+  }
+
+  function handleDeleteImportRow(rowIndex: number) {
+    if (!window.confirm(`Delete imported row #${rowIndex + 1}?`)) {
+      return;
+    }
+
+    setImportState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const updatedRows = current.rows.filter((_, index) => index !== rowIndex);
+
+      return {
+        ...current,
+        rows: updatedRows,
+        rowsBySheet: {
+          ...current.rowsBySheet,
+          [current.selectedSheetName]: updatedRows
+        }
       };
     });
 
@@ -322,6 +350,8 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
       return current;
     });
+
+    setNotice(`Removed imported row #${rowIndex + 1}.`);
   }
 
   function handleSaveImportRow(event: FormEvent<HTMLFormElement>) {
@@ -335,8 +365,15 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
     setImportState({
       ...importState,
-      rows: importState.rows.map((row, index) => (index === importEditor.rowIndex ? updatedRow : row))
+      rows: importState.rows.map((row, index) => (index === importEditor.rowIndex ? updatedRow : row)),
+      rowsBySheet: {
+        ...importState.rowsBySheet,
+        [importState.selectedSheetName]: importState.rows.map((row, index) =>
+          index === importEditor.rowIndex ? updatedRow : row
+        )
+      }
     });
+    setNotice(`Updated imported row #${importEditor.rowIndex + 1}.`);
     setImportEditor(null);
   }
 
@@ -566,16 +603,24 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
         type: "array",
         cellDates: false
       });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json<RowRecord>(sheet, {
-        defval: "",
-        raw: false
-      });
+      const rowsBySheet = Object.fromEntries(
+        workbook.SheetNames.map((sheetName) => {
+          const sheet = workbook.Sheets[sheetName];
+          const rows = XLSX.utils.sheet_to_json<RowRecord>(sheet, {
+            defval: "",
+            raw: false
+          });
+          return [sheetName, rows];
+        })
+      );
+      const selectedSheetName = workbook.SheetNames[0] ?? "";
 
       setImportState({
         fileName: file.name,
-        rows
+        sheetNames: workbook.SheetNames,
+        selectedSheetName,
+        rowsBySheet,
+        rows: rowsBySheet[selectedSheetName] ?? []
       });
       setImportEditor(null);
       setNotice("");
@@ -716,7 +761,19 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
               {exporting ? <span aria-hidden="true" className="spin" /> : null}
               {exporting ? "Exporting…" : "Export Excel"}
             </button>
-            <button className="ghost-button" onClick={() => setImportState({ fileName: "", rows: [] })} type="button">
+            <button
+              className="ghost-button"
+              onClick={() =>
+                setImportState({
+                  fileName: "",
+                  sheetNames: [],
+                  selectedSheetName: "",
+                  rowsBySheet: {},
+                  rows: []
+                })
+              }
+              type="button"
+            >
               Import Excel
             </button>
             <button className="primary-button" onClick={openCreateEditor} type="button">
@@ -1152,8 +1209,27 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
             <div className="import-summary">
               <strong>{importState.fileName || "No file selected yet"}</strong>
-              <span>{importState.rows.length} parsed rows</span>
+              <span>
+                {importState.selectedSheetName ? `Sheet: ${importState.selectedSheetName} · ` : ""}
+                {importState.rows.length} parsed rows
+              </span>
             </div>
+
+            {importState.sheetNames.length > 1 ? (
+              <label className="field" style={{ marginBottom: 16 }}>
+                <span>Choose worksheet</span>
+                <select
+                  value={importState.selectedSheetName}
+                  onChange={(event) => handleImportSheetChange(event.target.value)}
+                >
+                  {importState.sheetNames.map((sheetName) => (
+                    <option key={sheetName} value={sheetName}>
+                      {sheetName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
 
             <div className="auto-managed-note">
               <strong>Excel headers (exact column names)</strong>
@@ -1255,88 +1331,6 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
               </div>
             ) : null}
 
-            {importEditor && selectedTable ? (
-              <section className="panel import-edit-panel">
-                <div className="dialog-head" style={{ marginBottom: 12 }}>
-                  <div>
-                    <p className="eyebrow">Edit Imported Row</p>
-                    <h3>
-                      {selectedTable.label} Row #{importEditor.rowIndex + 1}
-                    </h3>
-                  </div>
-                  <button className="close-button" onClick={closeImportEditor} type="button">
-                    Close
-                  </button>
-                </div>
-
-                <form className="record-form" onSubmit={handleSaveImportRow}>
-                  <div className="form-grid">
-                    {importableColumns.map((column) => {
-                      const foreignOptions = column.foreignKey ? lookups[column.foreignKey.referencesTable] ?? [] : [];
-
-                      return (
-                        <label className="field" key={`import-${column.name}`}>
-                          <span>
-                            {column.label}
-                            {column.nullable ? " optional" : ""}
-                          </span>
-
-                          {column.foreignKey ? (
-                            <select
-                              value={importEditor.formState[column.name] ?? ""}
-                              onChange={(event) =>
-                                setImportEditor((current) =>
-                                  current
-                                    ? {
-                                        ...current,
-                                        formState: {
-                                          ...current.formState,
-                                          [column.name]: event.target.value
-                                        }
-                                      }
-                                    : current
-                                )
-                              }
-                            >
-                              <option value="">Select {column.label}</option>
-                              {foreignOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            renderFieldInput(column, importEditor.formState[column.name] ?? "", false, (value) =>
-                              setImportEditor((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      formState: {
-                                        ...current.formState,
-                                        [column.name]: value
-                                      }
-                                    }
-                                  : current
-                              )
-                            )
-                          )}
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  <div className="dialog-actions">
-                    <button className="ghost-button" onClick={closeImportEditor} type="button">
-                      Cancel
-                    </button>
-                    <button className="primary-button" type="submit">
-                      Save Row
-                    </button>
-                  </div>
-                </form>
-              </section>
-            ) : null}
-
             <div className="dialog-actions">
               <button className="ghost-button" onClick={closePanels} type="button">
                 Cancel
@@ -1350,6 +1344,91 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 {busy ? "Importing…" : "Import Rows"}
               </button>
             </div>
+          </section>
+        </div>
+      ) : null}
+
+      {importEditor && selectedTable ? (
+        <div className="overlay">
+          <section className="dialog">
+            <div className="dialog-head" style={{ marginBottom: 12 }}>
+              <div>
+                <p className="eyebrow">Edit Imported Row</p>
+                <h3>
+                  {selectedTable.label} Row #{importEditor.rowIndex + 1}
+                </h3>
+                <p className="dialog-copy">Review this parsed row before importing it.</p>
+              </div>
+              <button className="close-button" onClick={closeImportEditor} type="button">
+                Close
+              </button>
+            </div>
+
+            <form className="record-form" onSubmit={handleSaveImportRow}>
+              <div className="form-grid">
+                {importableColumns.map((column) => {
+                  const foreignOptions = column.foreignKey ? lookups[column.foreignKey.referencesTable] ?? [] : [];
+
+                  return (
+                    <label className="field" key={`import-${column.name}`}>
+                      <span>
+                        {column.label}
+                        {column.nullable ? " optional" : ""}
+                      </span>
+
+                      {column.foreignKey ? (
+                        <select
+                          value={importEditor.formState[column.name] ?? ""}
+                          onChange={(event) =>
+                            setImportEditor((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    formState: {
+                                      ...current.formState,
+                                      [column.name]: event.target.value
+                                    }
+                                  }
+                                : current
+                            )
+                          }
+                        >
+                          <option value="">Select {column.label}</option>
+                          {foreignOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        renderFieldInput(column, importEditor.formState[column.name] ?? "", false, (value) =>
+                          setImportEditor((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  formState: {
+                                    ...current.formState,
+                                    [column.name]: value
+                                  }
+                                }
+                              : current
+                          )
+                        )
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="dialog-actions">
+                <button className="ghost-button" onClick={closeImportEditor} type="button">
+                  Cancel
+                </button>
+                <button className="primary-button" type="submit">
+                  Save Row
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}

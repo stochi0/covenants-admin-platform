@@ -144,7 +144,7 @@ export async function importRecords(
   }
 
   for (const row of filteredRows) {
-    const payload = sanitizeRecord(table, row, "import");
+    const payload = await sanitizeImportRecord(table, row);
 
     if (Object.keys(payload).length === 0) {
       continue;
@@ -163,6 +163,29 @@ export async function importRecords(
   }
 
   return { processed: created + updated, created, updated };
+}
+
+async function sanitizeImportRecord(table: TableMeta, record: RecordInput): Promise<RecordInput> {
+  const payload = sanitizeRecord(table, record, "import");
+
+  for (const column of table.columns) {
+    if (!column.foreignKey) {
+      continue;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(payload, column.name)) {
+      continue;
+    }
+
+    const value = payload[column.name];
+    if (isBlankImportValue(value)) {
+      continue;
+    }
+
+    payload[column.name] = await resolveForeignKeyImportValue(column, value);
+  }
+
+  return payload;
 }
 
 export async function getOptions(tableName: string): Promise<OptionsResponse> {
@@ -466,17 +489,12 @@ function mergeImportedRecord(table: TableMeta, existingRecord: RecordInput, impo
       continue;
     }
 
-    const normalizedValue = normalizeValue(incomingValue, column.kind, column.nullable, column.hasDefault);
-    if (normalizedValue === undefined) {
-      continue;
-    }
-
     if (column.importBehavior === "merge_email_list") {
-      payload[column.name] = mergeEmailListValues(existingRecord[column.name], normalizedValue);
+      payload[column.name] = mergeEmailListValues(existingRecord[column.name], incomingValue);
       continue;
     }
 
-    payload[column.name] = normalizedValue;
+    payload[column.name] = incomingValue;
   }
 
   if (table.columns.some((column) => column.name === "updated_at")) {
@@ -519,6 +537,93 @@ function extractEmails(value: unknown): string[] {
 
   const matches = String(value).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
   return matches ?? [];
+}
+
+async function resolveForeignKeyImportValue(
+  column: TableMeta["columns"][number],
+  value: unknown
+): Promise<unknown> {
+  if (!column.foreignKey) {
+    return value;
+  }
+
+  const referencedTable = getTableOrThrow(column.foreignKey.referencesTable);
+  const candidateColumns = getForeignKeyLookupColumns(referencedTable, column.foreignKey.referencesColumn);
+
+  for (const candidateColumnName of candidateColumns) {
+    const candidateColumn = referencedTable.columns.find((entry) => entry.name === candidateColumnName);
+    if (!candidateColumn) {
+      continue;
+    }
+
+    if (candidateColumn.kind === "uuid" && !isUuidLike(value)) {
+      continue;
+    }
+
+    let query = supabase
+      .from(referencedTable.name)
+      .select(column.foreignKey.referencesColumn)
+      .limit(2);
+
+    if (candidateColumn.kind === "text" || candidateColumn.kind === "custom") {
+      query = query.ilike(candidateColumnName, String(value).trim());
+    } else {
+      query = query.eq(candidateColumnName, normalizeLookupValue(candidateColumn.kind, value) as never);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data || data.length === 0) {
+      continue;
+    }
+
+    if (data.length > 1) {
+      throw new Error(
+        `Could not resolve "${String(value)}" for "${column.name}" because multiple ${referencedTable.label.toLowerCase()} rows matched "${candidateColumnName}".`
+      );
+    }
+
+    return (data[0] as unknown as RecordInput)[column.foreignKey.referencesColumn];
+  }
+
+  throw new Error(
+    `Could not resolve "${String(value)}" for "${column.name}". Use a valid ${referencedTable.label.toLowerCase()} ${referencedTable.displayColumn} or ${column.foreignKey.referencesColumn}.`
+  );
+}
+
+function getForeignKeyLookupColumns(referencedTable: TableMeta, referenceColumn: string): string[] {
+  const singleColumnMatchers = (referencedTable.importMatchers ?? []).filter((matcher) => matcher.length === 1).flat();
+  return [...new Set([referenceColumn, referencedTable.displayColumn, ...singleColumnMatchers])];
+}
+
+function normalizeLookupValue(
+  kind: TableMeta["columns"][number]["kind"],
+  value: unknown
+): unknown {
+  if (kind === "number") {
+    const numberValue = typeof value === "number" ? value : Number(value);
+    return Number.isNaN(numberValue) ? value : numberValue;
+  }
+
+  if (kind === "boolean") {
+    if (typeof value === "boolean") {
+      return value;
+    }
+
+    const normalized = String(value).toLowerCase();
+    return ["true", "1", "yes"].includes(normalized);
+  }
+
+  return typeof value === "string" ? value.trim() : value;
+}
+
+function isUuidLike(value: unknown): boolean {
+  return typeof value === "string"
+    ? /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim())
+    : false;
 }
 
 function normalizeValue(
