@@ -4,6 +4,7 @@ import type {
   AuthStatusResponse,
   FacilityRelationsResponse,
   FacilityRelationsUpsertRequest,
+  ImportResponse,
   OptionsResponse,
   RecordsResponse,
   TableMeta
@@ -123,41 +124,44 @@ export async function deleteRecord(tableName: string, record: RecordInput): Prom
 export async function importRecords(
   tableName: string,
   rows: RecordInput[]
-): Promise<{ processed: number }> {
+): Promise<ImportResponse> {
   const table = getTableOrThrow(tableName);
   const filteredRows = rows.filter((row) => !isRowEmpty(row));
+  let created = 0;
+  let updated = 0;
 
   if (table.specialHandler === "users") {
     for (const row of filteredRows) {
-      if (hasPrimaryKeys(table, row)) {
-        await updateUserRecord(row);
+      const action = await importUserRecord(row);
+      if (action === "created") {
+        created += 1;
       } else {
-        await createUserRecord(row);
+        updated += 1;
       }
     }
 
-    return { processed: filteredRows.length };
+    return { processed: created + updated, created, updated };
   }
 
-  const payload = filteredRows.map((row) => sanitizeRecord(table, row, "import"));
+  for (const row of filteredRows) {
+    const payload = sanitizeRecord(table, row, "import");
 
-  if (payload.length === 0) {
-    return { processed: 0 };
-  }
-  const onConflict = table.primaryKeys.join(",");
+    if (Object.keys(payload).length === 0) {
+      continue;
+    }
 
-  for (const batch of chunk(payload, 200)) {
-    const { error } = await supabase.from(table.name).upsert(batch, {
-      onConflict,
-      ignoreDuplicates: false
-    });
+    const existingKeys = await findExistingImportKeys(table, payload);
 
-    if (error) {
-      throw new Error(error.message);
+    if (existingKeys) {
+      await updateRecord(table.name, { ...payload, ...existingKeys });
+      updated += 1;
+    } else {
+      await createRecord(table.name, payload);
+      created += 1;
     }
   }
 
-  return { processed: payload.length };
+  return { processed: created + updated, created, updated };
 }
 
 export async function getOptions(tableName: string): Promise<OptionsResponse> {
@@ -388,6 +392,62 @@ function hasPrimaryKeys(table: TableMeta, record: RecordInput): boolean {
   });
 }
 
+async function findExistingImportKeys(table: TableMeta, record: RecordInput): Promise<RecordInput | null> {
+  const matcher = getImportMatcherForRecord(table, record);
+
+  if (!matcher) {
+    throw new Error(
+      `Import for "${table.label}" requires one of these column sets to identify existing rows: ${formatImportMatchers(
+        table
+      )}.`
+    );
+  }
+
+  let query = supabase.from(table.name).select(table.primaryKeys.join(",")).limit(2);
+
+  for (const column of matcher) {
+    query = query.eq(column, record[column] as never);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data || data.length === 0) {
+    return null;
+  }
+
+  if (data.length > 1) {
+    throw new Error(
+      `Import row matched multiple ${table.label.toLowerCase()} records using ${matcher.join(", ")}. Clean up duplicates before importing again.`
+    );
+  }
+
+  return data[0] as unknown as RecordInput;
+}
+
+function getImportMatcherForRecord(table: TableMeta, record: RecordInput): string[] | null {
+  const matchers = table.importMatchers?.length ? table.importMatchers : [table.primaryKeys];
+
+  for (const matcher of matchers) {
+    if (matcher.every((column) => hasImportValue(record[column]))) {
+      return matcher;
+    }
+  }
+
+  return null;
+}
+
+function formatImportMatchers(table: TableMeta): string {
+  const matchers = table.importMatchers?.length ? table.importMatchers : [table.primaryKeys];
+  return matchers.map((matcher) => matcher.join(" + ")).join(" or ");
+}
+
+function hasImportValue(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== "";
+}
+
 function normalizeValue(
   value: unknown,
   kind: TableMeta["columns"][number]["kind"],
@@ -545,6 +605,31 @@ async function updateUserRecord(record: RecordInput) {
   }
 
   return data;
+}
+
+async function importUserRecord(record: RecordInput): Promise<"created" | "updated"> {
+  const email = asOptionalString(record.email);
+
+  if (!email) {
+    throw new Error('Users import requires an "email" value to match existing users.');
+  }
+
+  const { data, error } = await supabase.from("users").select("id").ilike("email", email).limit(2);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if ((data ?? []).length > 1) {
+    throw new Error(`Import row matched multiple users for email "${email}". Clean up duplicates before importing again.`);
+  }
+
+  if (data && data.length === 1) {
+    await updateUserRecord({ ...record, id: data[0].id });
+    return "updated";
+  }
+
+  await createUserRecord(record);
+  return "created";
 }
 
 async function deleteUserRecord(record: RecordInput) {

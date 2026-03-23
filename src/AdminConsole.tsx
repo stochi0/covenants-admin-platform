@@ -4,6 +4,7 @@ import type {
   ColumnMeta,
   FacilityRelationsResponse,
   FacilityRelationsUpsertRequest,
+  ImportResponse,
   OptionsResponse,
   RecordsResponse,
   SchemaResponse,
@@ -148,6 +149,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
         autoManagedFields: [],
         connectedTableCount: 0,
         ignoredImportHeaders: [],
+        importMatchers: [],
         importableColumns: []
       };
     }
@@ -164,10 +166,12 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       autoManagedFields: autoManagedColumns.map((column) => column.label),
       connectedTableCount: selectedTable.columns.filter((column) => column.foreignKey).length,
       ignoredImportHeaders: ignoredColumns.map((column) => column.name),
+      importMatchers: selectedTable.importMatchers ?? [],
       importableColumns: importableTableColumns
     };
   }, [selectedTable]);
-  const { autoManagedFields, connectedTableCount, ignoredImportHeaders, importableColumns } = selectedTableDetails;
+  const { autoManagedFields, connectedTableCount, ignoredImportHeaders, importMatchers, importableColumns } =
+    selectedTableDetails;
   const importHeaders = useMemo(
     () => ({
       optional: importableColumns.filter((column) => column.nullable || column.hasDefault).map((column) => column.name),
@@ -189,6 +193,23 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
     return Object.keys(importState.rows[0]).filter((column) => !hiddenHeaders.has(column));
   }, [importState?.rows, selectedTable]);
+  const activeImportMatcher = useMemo(
+    () => importMatchers.find((matcher) => matcher.every((column) => previewColumns.includes(column))) ?? null,
+    [importMatchers, previewColumns]
+  );
+  const importMatcherSummary = useMemo(
+    () => importMatchers.map((matcher) => matcher.join(" + ")),
+    [importMatchers]
+  );
+  const importMismatchMessage = useMemo(() => {
+    if (!selectedTable || !importState || importState.rows.length === 0 || importMatchers.length === 0 || activeImportMatcher) {
+      return "";
+    }
+
+    return `This file cannot safely match existing ${selectedTable.label.toLowerCase()} rows yet. Include ${importMatcherSummary.join(
+      " or "
+    )} so imports update existing records instead of creating duplicates.`;
+  }, [activeImportMatcher, importMatcherSummary, importMatchers.length, importState, selectedTable]);
 
   async function loadSchema() {
     try {
@@ -403,16 +424,23 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       return;
     }
 
+    if (importMismatchMessage) {
+      setError(importMismatchMessage);
+      return;
+    }
+
     try {
       setBusy(true);
       setError("");
-      const response = await api<{ processed: number }>(accessToken, `/api/import/${selectedTable.name}`, {
+      const response = await api<ImportResponse>(accessToken, `/api/import/${selectedTable.name}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: importState.rows })
       });
 
-      setNotice(`Imported ${response.processed} rows into ${selectedTable.label}.`);
+      setNotice(
+        `Imported ${response.processed} rows into ${selectedTable.label} (${response.created} created, ${response.updated} updated).`
+      );
       closePanels();
       await refreshRecords();
     } catch (apiError) {
@@ -984,7 +1012,8 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 <p className="eyebrow">Excel Import</p>
                 <h3>{selectedTable.label}</h3>
                 <p className="dialog-copy">
-                  Match spreadsheet headers to database columns. Generated IDs and timestamps are ignored.
+                  Match spreadsheet headers to database columns. Existing rows are updated when the import matcher
+                  columns line up, and generated IDs and timestamps are ignored.
                 </p>
               </div>
               <button className="close-button" onClick={closePanels} type="button">
@@ -1033,6 +1062,16 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                     : "None"}
                 </div>
                 <div>
+                  <strong>Matches Existing Rows By:</strong>{" "}
+                  {importMatcherSummary.length > 0
+                    ? importMatcherSummary.map((name) => (
+                        <code key={`match-${name}`} style={{ marginRight: 8 }}>
+                          {name}
+                        </code>
+                      ))
+                    : "Primary key"}
+                </div>
+                <div>
                   <strong>Ignored:</strong>{" "}
                   {ignoredImportHeaders.length > 0
                     ? ignoredImportHeaders.map((name) => (
@@ -1044,6 +1083,16 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 </div>
               </div>
             </div>
+
+            {importMismatchMessage ? (
+              <div className="helper-note" role="alert" style={{ color: "#f97316", marginTop: 12 }}>
+                {importMismatchMessage}
+              </div>
+            ) : activeImportMatcher ? (
+              <div className="helper-note" style={{ marginTop: 12 }}>
+                This file will match existing rows using <code>{activeImportMatcher.join(" + ")}</code>.
+              </div>
+            ) : null}
 
             {importState.rows.length > 0 ? (
               <div className="preview-table">
@@ -1074,7 +1123,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
               </button>
               <button
                 className="primary-button"
-                disabled={busy || importState.rows.length === 0}
+                disabled={busy || importState.rows.length === 0 || Boolean(importMismatchMessage)}
                 onClick={() => void handleImportSubmit()}
                 type="button"
               >

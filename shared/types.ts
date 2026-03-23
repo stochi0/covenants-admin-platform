@@ -33,6 +33,7 @@ export interface TableMeta {
   label: string;
   description?: string;
   primaryKeys: string[];
+  importMatchers?: string[][];
   displayColumn: string;
   searchableColumns: string[];
   listColumns: string[];
@@ -47,6 +48,12 @@ export interface SchemaResponse {
 export interface RecordsResponse {
   records: Record<string, unknown>[];
   total: number;
+}
+
+export interface ImportResponse {
+  processed: number;
+  created: number;
+  updated: number;
 }
 
 export interface OptionsResponse {
