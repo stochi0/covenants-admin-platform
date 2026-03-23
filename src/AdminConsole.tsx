@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type {
   ColumnMeta,
@@ -40,11 +40,12 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
   const [records, setRecords] = useState<RowRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [loadingSchema, setLoadingSchema] = useState(true);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
@@ -83,7 +84,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
     void api<RecordsResponse>(accessToken,
       `/api/records/${selectedTable.name}?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}&search=${encodeURIComponent(
-        deferredSearch
+        appliedSearch
       )}`,
       { signal: controller.signal }
     )
@@ -103,7 +104,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       });
 
     return () => controller.abort();
-  }, [deferredSearch, page, selectedTable]);
+  }, [accessToken, appliedSearch, page, selectedTable]);
 
   useEffect(() => {
     if (!selectedTable || foreignTableNames.length === 0) {
@@ -224,6 +225,12 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     } finally {
       setLoadingSchema(false);
     }
+  }
+
+  function handleSearchSubmit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    setPage(0);
+    setAppliedSearch(searchInput.trim());
   }
 
   function openCreateEditor() {
@@ -396,7 +403,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     const data = await api<RecordsResponse>(
       accessToken,
       `/api/records/${selectedTable.name}?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}&search=${encodeURIComponent(
-        deferredSearch
+        appliedSearch
       )}`
     );
     setRecords(data.records);
@@ -416,6 +423,37 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       setError(getErrorMessage(apiError));
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function handleExportClick() {
+    if (!selectedTable) {
+      return;
+    }
+
+    try {
+      setExporting(true);
+      setError("");
+      const rows = await fetchRecordsForExport(accessToken, selectedTable.name, appliedSearch);
+      const exportColumns = selectedTable.columns.filter((column) => !column.hidden);
+      const worksheetRows = rows.map((row) =>
+        Object.fromEntries(
+          exportColumns.map((column) => [
+            column.name,
+            row[column.name] === undefined || row[column.name] === null ? "" : row[column.name]
+          ])
+        )
+      );
+      const XLSX = await import("xlsx");
+      const worksheet = XLSX.utils.json_to_sheet(worksheetRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, selectedTable.label.slice(0, 31) || selectedTable.name);
+      XLSX.writeFile(workbook, createExportFilename(selectedTable.name));
+      setNotice(`Exported ${rows.length} ${selectedTable.label.toLowerCase()} rows to Excel.`);
+    } catch (exportError) {
+      setError(getErrorMessage(exportError));
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -517,7 +555,8 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 startTransition(() => {
                   setSelectedTableName(table.name);
                   setPage(0);
-                  setSearch("");
+                  setSearchInput("");
+                  setAppliedSearch("");
                   setNotice("");
                   setError("");
                   closePanels();
@@ -569,18 +608,22 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
         <section className="panel controls">
           <div className="controls-copy">
-            <label className="search">
+            <form className="search-form" onSubmit={handleSearchSubmit}>
+              <label className="search">
               <span>Search rows</span>
-              <input
-                value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  setPage(0);
-                }}
-                placeholder={`Search ${selectedTable.label.toLowerCase()}...`}
-                type="search"
-              />
-            </label>
+                <div className="search-input-group">
+                  <input
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
+                    placeholder={`Search ${selectedTable.label.toLowerCase()}...`}
+                    type="search"
+                  />
+                  <button className="ghost-button" disabled={loadingRecords} type="submit">
+                    Search
+                  </button>
+                </div>
+              </label>
+            </form>
             <p className="helper-note">
               Auto-generated fields stay hidden. Imports ignore them even if they appear in the sheet.
             </p>
@@ -595,6 +638,15 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
             >
               {refreshing ? <span aria-hidden="true" className="spin" /> : null}
               {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              className="ghost-button button-with-spinner"
+              disabled={loadingRecords || exporting}
+              onClick={() => void handleExportClick()}
+              type="button"
+            >
+              {exporting ? <span aria-hidden="true" className="spin" /> : null}
+              {exporting ? "Exporting…" : "Export Excel"}
             </button>
             <button className="ghost-button" onClick={() => setImportState({ fileName: "", rows: [] })} type="button">
               Import Excel
@@ -1326,6 +1378,30 @@ function formatCellValue(value: unknown): string {
 function createRowKey(table: TableMeta, row: RowRecord, index: number) {
   const key = table.primaryKeys.map((column) => String(row[column] ?? "")).join("|");
   return key || `${table.name}-${index}`;
+}
+
+async function fetchRecordsForExport(accessToken: string, tableName: string, search: string): Promise<RowRecord[]> {
+  const rows: RowRecord[] = [];
+  const limit = 500;
+  let offset = 0;
+  let total = 0;
+
+  do {
+    const data = await api<RecordsResponse>(
+      accessToken,
+      `/api/records/${tableName}?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}`
+    );
+    rows.push(...data.records);
+    total = data.total;
+    offset += data.records.length;
+  } while (offset < total);
+
+  return rows;
+}
+
+function createExportFilename(tableName: string) {
+  const stamp = new Date().toISOString().slice(0, 10);
+  return `${tableName}-${stamp}.xlsx`;
 }
 
 async function api<T>(accessToken: string, url: string, init?: RequestInit): Promise<T> {
