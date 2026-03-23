@@ -269,7 +269,8 @@ export const schemaTables: TableMeta[] = [
       },
       {
         name: "company_id",
-        label: "Company Id",
+        label: "Company Name",
+        importHeader: "company_name",
         sqlType: "uuid",
         kind: "uuid",
         nullable: false,
@@ -313,7 +314,8 @@ export const schemaTables: TableMeta[] = [
       },
       {
         name: "region_id",
-        label: "Region Id",
+        label: "Region Name",
+        importHeader: "region_name",
         sqlType: "uuid",
         kind: "uuid",
         nullable: true,
@@ -433,7 +435,8 @@ export const schemaTables: TableMeta[] = [
     columns: [
       {
         name: "facility_id",
-        label: "Facility Id",
+        label: "Facility Name",
+        importHeader: "facility_name",
         sqlType: "uuid",
         kind: "uuid",
         nullable: false,
@@ -451,7 +454,8 @@ export const schemaTables: TableMeta[] = [
       },
       {
         name: "accreditation_id",
-        label: "Accreditation Id",
+        label: "Accreditation",
+        importHeader: "accreditation",
         sqlType: "uuid",
         kind: "uuid",
         nullable: false,
@@ -545,7 +549,8 @@ export const schemaTables: TableMeta[] = [
     columns: [
       {
         name: "facility_id",
-        label: "Facility Id",
+        label: "Facility Name",
+        importHeader: "facility_name",
         sqlType: "uuid",
         kind: "uuid",
         nullable: false,
@@ -563,7 +568,8 @@ export const schemaTables: TableMeta[] = [
       },
       {
         name: "chemistry_id",
-        label: "Chemistry Id",
+        label: "Chemistry",
+        importHeader: "chemistry",
         sqlType: "uuid",
         kind: "uuid",
         nullable: false,
@@ -605,7 +611,8 @@ export const schemaTables: TableMeta[] = [
     columns: [
       {
         name: "facility_id",
-        label: "Facility Id",
+        label: "Facility Name",
+        importHeader: "facility_name",
         sqlType: "uuid",
         kind: "uuid",
         nullable: false,
@@ -623,7 +630,8 @@ export const schemaTables: TableMeta[] = [
       },
       {
         name: "product_id",
-        label: "Product Id",
+        label: "Product",
+        importHeader: "product",
         sqlType: "text",
         kind: "text",
         nullable: false,

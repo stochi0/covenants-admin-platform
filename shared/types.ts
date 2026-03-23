@@ -16,6 +16,7 @@ export interface ForeignKeyMeta {
 export interface ColumnMeta {
   name: string;
   label: string;
+  importHeader?: string;
   sqlType: string;
   kind: ColumnKind;
   importBehavior?: "replace" | "merge_email_list";

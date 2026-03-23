@@ -26,9 +26,10 @@ export async function listRecords(
   let query = supabase.from(table.name).select("*", { count: "exact" });
 
   if (options.search && table.searchableColumns.length > 0) {
-    const escaped = escapeForIlike(options.search);
-    const filters = table.searchableColumns.map((column) => `${column}.ilike.%${escaped}%`);
-    query = query.or(filters.join(","));
+    const filters = await buildSearchFilters(table, options.search);
+    if (filters.length > 0) {
+      query = query.or(filters.join(","));
+    }
   }
 
   const orderColumn = table.columns.some((column) => column.name === "created_at")
@@ -50,6 +51,91 @@ export async function listRecords(
   };
 }
 
+async function buildSearchFilters(table: TableMeta, search: string): Promise<string[]> {
+  const filters: string[] = [];
+  const escaped = escapeForIlike(search);
+
+  for (const columnName of table.searchableColumns) {
+    const column = table.columns.find((entry) => entry.name === columnName);
+    if (!column) {
+      continue;
+    }
+
+    if (column.foreignKey) {
+      const foreignMatches = await findForeignKeySearchMatches(column, search);
+      if (foreignMatches.length > 0) {
+        filters.push(`${column.name}.in.(${foreignMatches.join(",")})`);
+      }
+      continue;
+    }
+
+    if (["text", "custom", "date", "timestamp"].includes(column.kind)) {
+      filters.push(`${column.name}.ilike.%${escaped}%`);
+      continue;
+    }
+
+    if (column.kind === "uuid" && isUuidLike(search)) {
+      filters.push(`${column.name}.eq.${search.trim()}`);
+      continue;
+    }
+
+    if (column.kind === "number") {
+      const value = Number(search);
+      if (!Number.isNaN(value)) {
+        filters.push(`${column.name}.eq.${value}`);
+      }
+      continue;
+    }
+
+    if (column.kind === "boolean") {
+      const normalized = search.trim().toLowerCase();
+      if (["true", "1", "yes"].includes(normalized)) {
+        filters.push(`${column.name}.eq.true`);
+      } else if (["false", "0", "no"].includes(normalized)) {
+        filters.push(`${column.name}.eq.false`);
+      }
+    }
+  }
+
+  return filters;
+}
+
+async function findForeignKeySearchMatches(column: TableMeta["columns"][number], search: string): Promise<string[]> {
+  if (!column.foreignKey) {
+    return [];
+  }
+
+  const referencedTable = getTableOrThrow(column.foreignKey.referencesTable);
+  let query = supabase.from(referencedTable.name).select(column.foreignKey.referencesColumn).limit(50);
+  const escaped = escapeForIlike(search);
+  const textFilters = referencedTable.searchableColumns
+    .map((columnName) => referencedTable.columns.find((entry) => entry.name === columnName))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .filter((entry) => ["text", "custom", "date", "timestamp"].includes(entry.kind))
+    .map((entry) => `${entry.name}.ilike.%${escaped}%`);
+
+  if (isUuidLike(search)) {
+    textFilters.push(`${column.foreignKey.referencesColumn}.eq.${search.trim()}`);
+  }
+
+  if (textFilters.length === 0) {
+    return [];
+  }
+
+  query = query.or(textFilters.join(","));
+
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return [
+    ...new Set((data ?? []).map((row) => String((row as unknown as RecordInput)[column.foreignKey!.referencesColumn] ?? "")))
+      .values()
+  ]
+    .filter(Boolean);
+}
+
 export async function createRecord(
   tableName: string,
   record: RecordInput
@@ -60,7 +146,7 @@ export async function createRecord(
     return createUserRecord(record);
   }
 
-  const payload = sanitizeRecord(table, record, "create");
+  const payload = await prepareRecordForPersist(table, sanitizeRecord(table, record, "create"));
   const { data, error } = await supabase
     .from(table.name)
     .insert(payload)
@@ -85,7 +171,7 @@ export async function updateRecord(
   }
 
   const keys = extractPrimaryKeys(table, record);
-  const payload = sanitizeRecord(table, record, "update");
+  const payload = await prepareRecordForPersist(table, sanitizeRecord(table, record, "update"));
   let query = supabase.from(table.name).update(payload).select("*");
 
   for (const [column, value] of Object.entries(keys)) {
@@ -153,7 +239,7 @@ export async function importRecords(
     const existingRecord = await findExistingImportRecord(table, payload);
 
     if (existingRecord) {
-      const mergedRecord = mergeImportedRecord(table, existingRecord, row);
+      const mergedRecord = mergeImportedRecord(table, existingRecord, row, payload);
       await updateRecord(table.name, { ...extractPrimaryKeys(table, existingRecord), ...mergedRecord });
       updated += 1;
     } else {
@@ -183,6 +269,17 @@ async function sanitizeImportRecord(table: TableMeta, record: RecordInput): Prom
     }
 
     payload[column.name] = await resolveForeignKeyImportValue(column, value);
+  }
+
+  return await prepareRecordForPersist(table, payload);
+}
+
+async function prepareRecordForPersist(table: TableMeta, payload: RecordInput): Promise<RecordInput> {
+  if (table.name === "facilities" && isBlankImportValue(payload.region_id) && !isBlankImportValue(payload.address)) {
+    const inferredRegionId = await inferRegionIdFromAddress(payload.address);
+    if (inferredRegionId) {
+      payload.region_id = inferredRegionId;
+    }
   }
 
   return payload;
@@ -472,7 +569,12 @@ function hasImportValue(value: unknown): boolean {
   return value !== undefined && value !== null && value !== "";
 }
 
-function mergeImportedRecord(table: TableMeta, existingRecord: RecordInput, importedRecord: RecordInput): RecordInput {
+function mergeImportedRecord(
+  table: TableMeta,
+  existingRecord: RecordInput,
+  importedRecord: RecordInput,
+  sanitizedImportedRecord: RecordInput
+): RecordInput {
   const payload: RecordInput = {};
 
   for (const column of table.columns) {
@@ -494,7 +596,11 @@ function mergeImportedRecord(table: TableMeta, existingRecord: RecordInput, impo
       continue;
     }
 
-    payload[column.name] = incomingValue;
+    if (!Object.prototype.hasOwnProperty.call(sanitizedImportedRecord, column.name)) {
+      continue;
+    }
+
+    payload[column.name] = sanitizedImportedRecord[column.name];
   }
 
   if (table.columns.some((column) => column.name === "updated_at")) {
@@ -589,6 +695,11 @@ async function resolveForeignKeyImportValue(
     return (data[0] as unknown as RecordInput)[column.foreignKey.referencesColumn];
   }
 
+  const createdReference = await autoCreateForeignImportRecord(column, value);
+  if (createdReference) {
+    return createdReference[column.foreignKey.referencesColumn];
+  }
+
   throw new Error(
     `Could not resolve "${String(value)}" for "${column.name}". Use a valid ${referencedTable.label.toLowerCase()} ${referencedTable.displayColumn} or ${column.foreignKey.referencesColumn}.`
   );
@@ -624,6 +735,180 @@ function isUuidLike(value: unknown): boolean {
   return typeof value === "string"
     ? /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim())
     : false;
+}
+
+function normalizeTextValue(value: string): string {
+  return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function inferRegionIdFromAddress(address: unknown): Promise<string | null> {
+  if (typeof address !== "string" || !address.trim()) {
+    return null;
+  }
+
+  const normalizedAddress = normalizeTextValue(address).toLowerCase();
+  const regions = await listRegionsForInference();
+  const directMatch = regions.find((region) => normalizedAddress.includes(region.name.toLowerCase()));
+  if (directMatch) {
+    return directMatch.id;
+  }
+
+  const inferredRegionName = inferRegionNameFromAddress(normalizedAddress);
+  if (!inferredRegionName) {
+    return null;
+  }
+
+  const existingRegion = regions.find((region) => region.name.toLowerCase() === inferredRegionName);
+  if (existingRegion) {
+    return existingRegion.id;
+  }
+
+  const seededRegion = await seedMissingRegion(inferredRegionName);
+  return seededRegion?.id ?? null;
+}
+
+async function listRegionsForInference(): Promise<Array<{ id: string; name: string }>> {
+  const { data, error } = await supabase.from("regions").select("id,name");
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((row) => ({
+    id: String((row as unknown as RecordInput).id ?? ""),
+    name: String((row as unknown as RecordInput).name ?? "")
+  }));
+}
+
+function inferRegionNameFromAddress(address: string): string | null {
+  const aliases: Array<[string, string]> = [
+    ["andhara pradesh", "andhra pradesh"],
+    ["anakapalli", "andhra pradesh"],
+    ["ahmedabad", "gujarat"],
+    ["anand", "gujarat"],
+    ["ankleshwar", "gujarat"],
+    ["dahej", "gujarat"],
+    ["sayakha", "gujarat"],
+    ["vadodara", "gujarat"],
+    ["panoli", "gujarat"],
+    ["hyderabad", "telangana"],
+    ["uppal", "telangana"],
+    ["bangalore", "karnataka"],
+    ["raichur", "karnataka"],
+    ["khopoli", "maharashtra"],
+    ["mumbai", "maharashtra"],
+    ["navi mumbai", "maharashtra"],
+    ["nashik", "maharashtra"],
+    ["dhule", "maharashtra"],
+    ["pune", "maharashtra"],
+    ["udaipu", "rajasthan"],
+    ["delhi", "delhi"],
+    ["rezzato", "lombardy"],
+    ["italy", "lombardy"]
+  ];
+
+  const match = aliases.find(([token]) => address.includes(token));
+  return match?.[1] ?? null;
+}
+
+async function seedMissingRegion(regionName: string): Promise<{ id: string; name: string } | null> {
+  const definitions: Record<string, { name: string; iso_code: string; country: string }> = {
+    delhi: { name: "Delhi", iso_code: "IN-DL", country: "IN" },
+    lombardy: { name: "Lombardy", iso_code: "IT-25", country: "IT" }
+  };
+
+  const definition = definitions[regionName];
+  if (!definition) {
+    return null;
+  }
+
+  const existing = await supabase
+    .from("regions")
+    .select("id,name")
+    .ilike("name", definition.name)
+    .limit(1)
+    .maybeSingle();
+  if (existing.error) {
+    throw new Error(existing.error.message);
+  }
+
+  if (existing.data) {
+    return {
+      id: String((existing.data as unknown as RecordInput).id ?? ""),
+      name: String((existing.data as unknown as RecordInput).name ?? definition.name)
+    };
+  }
+
+  const created = await createRecord("regions", definition);
+  return {
+    id: String(created.id ?? ""),
+    name: String(created.name ?? definition.name)
+  };
+}
+
+async function autoCreateForeignImportRecord(
+  column: TableMeta["columns"][number],
+  value: unknown
+): Promise<RecordInput | null> {
+  if (!column.foreignKey || isBlankImportValue(value)) {
+    return null;
+  }
+
+  const referencedTable = getTableOrThrow(column.foreignKey.referencesTable);
+  const candidateColumns = getForeignKeyLookupColumns(referencedTable, column.foreignKey.referencesColumn);
+
+  for (const candidateColumnName of candidateColumns) {
+    const candidateColumn = referencedTable.columns.find((entry) => entry.name === candidateColumnName);
+    if (!candidateColumn) {
+      continue;
+    }
+
+    const payload = buildForeignImportCreatePayload(referencedTable, candidateColumn, value);
+    if (!payload) {
+      continue;
+    }
+
+    return await createRecord(referencedTable.name, payload);
+  }
+
+  return null;
+}
+
+function buildForeignImportCreatePayload(
+  table: TableMeta,
+  sourceColumn: TableMeta["columns"][number],
+  value: unknown
+): RecordInput | null {
+  if (sourceColumn.hidden || sourceColumn.readOnly || sourceColumn.autoGenerated) {
+    return null;
+  }
+
+  if (sourceColumn.kind === "uuid" && !isUuidLike(value)) {
+    return null;
+  }
+
+  const normalizedValue = normalizeValue(value, sourceColumn.kind, sourceColumn.nullable, sourceColumn.hasDefault);
+  if (normalizedValue === undefined || isBlankImportValue(normalizedValue)) {
+    return null;
+  }
+
+  const payload: RecordInput = {
+    [sourceColumn.name]: normalizedValue
+  };
+
+  for (const column of table.columns) {
+    if (column.hidden || column.readOnly || column.autoGenerated || column.name === sourceColumn.name) {
+      continue;
+    }
+
+    const requiresExplicitValue = !column.nullable && !column.hasDefault;
+    if (!requiresExplicitValue) {
+      continue;
+    }
+
+    return null;
+  }
+
+  return payload;
 }
 
 function normalizeValue(
@@ -667,7 +952,7 @@ function normalizeValue(
     return String(value).slice(0, 10);
   }
 
-  return typeof value === "string" ? value.trim() : value;
+  return typeof value === "string" ? normalizeTextValue(value) : value;
 }
 
 async function createUserRecord(record: RecordInput) {

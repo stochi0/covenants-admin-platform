@@ -175,7 +175,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     return {
       autoManagedFields: autoManagedColumns.map((column) => column.label),
       connectedTableCount: selectedTable.columns.filter((column) => column.foreignKey).length,
-      ignoredImportHeaders: ignoredColumns.map((column) => column.name),
+      ignoredImportHeaders: ignoredColumns.map((column) => getImportHeaderName(column)),
       importMatchers: selectedTable.importMatchers ?? [],
       importableColumns: importableTableColumns
     };
@@ -184,8 +184,12 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     selectedTableDetails;
   const importHeaders = useMemo(
     () => ({
-      optional: importableColumns.filter((column) => column.nullable || column.hasDefault).map((column) => column.name),
-      required: importableColumns.filter((column) => !column.nullable && !column.hasDefault).map((column) => column.name)
+      optional: importableColumns
+        .filter((column) => column.nullable || column.hasDefault)
+        .map((column) => getImportHeaderName(column)),
+      required: importableColumns
+        .filter((column) => !column.nullable && !column.hasDefault)
+        .map((column) => getImportHeaderName(column))
     }),
     [importableColumns]
   );
@@ -208,8 +212,13 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     [importMatchers, previewColumns]
   );
   const importMatcherSummary = useMemo(
-    () => importMatchers.map((matcher) => matcher.join(" + ")),
-    [importMatchers]
+    () =>
+      importMatchers.map((matcher) =>
+        matcher
+          .map((columnName) => getImportHeaderName(selectedTable?.columns.find((column) => column.name === columnName) ?? columnName))
+          .join(" + ")
+      ),
+    [importMatchers, selectedTable]
   );
   const importMismatchMessage = useMemo(() => {
     if (!selectedTable || !importState || importState.rows.length === 0 || importMatchers.length === 0 || activeImportMatcher) {
@@ -250,8 +259,18 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     setNotice("");
     setEditor({ mode: "create", row: null });
     setFormState(createEmptyForm(selectedTable));
-    setFacilityRelations(null);
-    setFacilityRelationsDraft(null);
+    if (selectedTable.name === "facilities") {
+      setFacilityRelations(null);
+      setFacilityRelationsDraft({
+        chemistryIds: [],
+        productIds: [],
+        accreditations: []
+      });
+      void ensureFacilityRelationOptions();
+    } else {
+      setFacilityRelations(null);
+      setFacilityRelationsDraft(null);
+    }
   }
 
   function openEditEditor(row: RowRecord) {
@@ -389,7 +408,6 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       setError("");
       if (
         selectedTable.name === "facilities" &&
-        editor.mode === "edit" &&
         facilityRelationsDraft?.accreditations
       ) {
         const invalid = facilityRelationsDraft.accreditations.some((row) => !row.accreditationId);
@@ -399,7 +417,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       }
       const payload = buildPayload(selectedTable, formState, editor);
       const method = editor.mode === "create" ? "POST" : "PATCH";
-      await api(accessToken, `/api/records/${selectedTable.name}`, {
+      const savedRow = await api<RowRecord>(accessToken, `/api/records/${selectedTable.name}`, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -407,12 +425,10 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
       if (
         selectedTable.name === "facilities" &&
-        editor.mode === "edit" &&
         facilityRelationsDraft &&
-        editor.row &&
-        String(editor.row.id ?? "")
+        String(savedRow.id ?? editor.row?.id ?? "")
       ) {
-        const facilityId = String(editor.row.id ?? "");
+        const facilityId = String(savedRow.id ?? editor.row?.id ?? "");
         await api<FacilityRelationsResponse>(accessToken, `/api/facilities/${facilityId}/relations`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -439,16 +455,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       setFacilityRelationsLoading(true);
       setError("");
 
-      // Ensure options exist for relation pickers.
-      const needed = ["chemistries", "products", "accreditations"];
-      await Promise.all(
-        needed
-          .filter((tableName) => !lookups[tableName])
-          .map(async (tableName) => {
-            const data = await api<OptionsResponse>(accessToken, `/api/options/${tableName}`);
-            setLookups((current) => ({ ...current, [tableName]: data.options }));
-          })
-      );
+      await ensureFacilityRelationOptions();
 
       const data = await api<FacilityRelationsResponse>(accessToken, `/api/facilities/${facilityId}/relations`);
       setFacilityRelations(data);
@@ -468,6 +475,18 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     } finally {
       setFacilityRelationsLoading(false);
     }
+  }
+
+  async function ensureFacilityRelationOptions() {
+    const needed = ["chemistries", "products", "accreditations"];
+    await Promise.all(
+      needed
+        .filter((tableName) => !lookups[tableName])
+        .map(async (tableName) => {
+          const data = await api<OptionsResponse>(accessToken, `/api/options/${tableName}`);
+          setLookups((current) => ({ ...current, [tableName]: data.options }));
+        })
+    );
   }
 
   async function handleDeleteRecord(row: RowRecord) {
@@ -543,8 +562,8 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       const worksheetRows = rows.map((row) =>
         Object.fromEntries(
           exportColumns.map((column) => [
-            column.name,
-            row[column.name] === undefined || row[column.name] === null ? "" : row[column.name]
+            getImportHeaderName(column),
+            getExportCellValue(column, row, lookups)
           ])
         )
       );
@@ -606,10 +625,13 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       const rowsBySheet = Object.fromEntries(
         workbook.SheetNames.map((sheetName) => {
           const sheet = workbook.Sheets[sheetName];
-          const rows = XLSX.utils.sheet_to_json<RowRecord>(sheet, {
+          const parsedRows = XLSX.utils.sheet_to_json<RowRecord>(sheet, {
             defval: "",
             raw: false
           });
+          const rows = selectedTable
+            ? parsedRows.map((row) => normalizeImportedRow(selectedTable, row))
+            : parsedRows;
           return [sheetName, rows];
         })
       );
@@ -638,7 +660,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
   }
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const isFacilityEditor = selectedTable.name === "facilities" && editor?.mode === "edit";
+  const isFacilityEditor = selectedTable.name === "facilities" && Boolean(editor);
 
   return (
     <div className="shell">
@@ -871,6 +893,15 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
             </div>
 
             <form className="record-form" onSubmit={(event) => void handleSaveRecord(event)}>
+              <div className="dialog-actions import-top-actions">
+                <button className="ghost-button" onClick={closePanels} type="button">
+                  Close
+                </button>
+                <button className="primary-button" disabled={busy} type="submit">
+                  {busy ? "Saving…" : editor.mode === "create" ? "Create Row" : "Save Changes"}
+                </button>
+              </div>
+
               <div className="form-grid">
               {editableColumns.map((column) => {
                 const disabled = editor.mode === "edit" && column.isPrimaryKey;
@@ -1167,15 +1198,6 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                   />
                 </label>
               ) : null}
-
-              <div className="dialog-actions">
-                <button className="ghost-button" onClick={closePanels} type="button">
-                  Cancel
-                </button>
-                <button className="primary-button" disabled={busy} type="submit">
-                  {busy ? "Saving…" : editor.mode === "create" ? "Create Row" : "Save Changes"}
-                </button>
-              </div>
             </form>
           </section>
         </div>
@@ -1193,8 +1215,19 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                   columns line up, blank cells keep existing values, and generated IDs and timestamps are ignored.
                 </p>
               </div>
-              <button className="close-button" onClick={closePanels} type="button">
+            </div>
+
+            <div className="dialog-actions import-top-actions">
+              <button className="ghost-button" onClick={closePanels} type="button">
                 Close
+              </button>
+              <button
+                className="primary-button"
+                disabled={busy || importState.rows.length === 0 || Boolean(importMismatchMessage)}
+                onClick={() => void handleImportSubmit()}
+                type="button"
+              >
+                {busy ? "Importing…" : "Import Rows"}
               </button>
             </div>
 
@@ -1298,7 +1331,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                     <tr>
                       <th>#</th>
                       {previewColumns.map((column) => (
-                        <th key={column}>{column}</th>
+                        <th key={column}>{getImportHeaderName(selectedTable.columns.find((entry) => entry.name === column) ?? column)}</th>
                       ))}
                       <th>Actions</th>
                     </tr>
@@ -1331,19 +1364,6 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
               </div>
             ) : null}
 
-            <div className="dialog-actions">
-              <button className="ghost-button" onClick={closePanels} type="button">
-                Cancel
-              </button>
-              <button
-                className="primary-button"
-                disabled={busy || importState.rows.length === 0 || Boolean(importMismatchMessage)}
-                onClick={() => void handleImportSubmit()}
-                type="button"
-              >
-                {busy ? "Importing…" : "Import Rows"}
-              </button>
-            </div>
           </section>
         </div>
       ) : null}
@@ -1570,6 +1590,43 @@ function buildRowFromForm(columns: ColumnMeta[], formState: FormState): RowRecor
   }
 
   return row;
+}
+
+function getImportHeaderName(column: ColumnMeta | string): string {
+  return typeof column === "string" ? column : column.importHeader ?? column.name;
+}
+
+function normalizeImportedRow(table: TableMeta, row: RowRecord): RowRecord {
+  const normalized: RowRecord = {};
+  const columnMap = new Map<string, string>();
+
+  for (const column of table.columns) {
+    columnMap.set(column.name, column.name);
+    columnMap.set(getImportHeaderName(column), column.name);
+  }
+
+  for (const [header, value] of Object.entries(row)) {
+    const normalizedHeader = columnMap.get(header.trim());
+    normalized[normalizedHeader ?? header.trim()] = value;
+  }
+
+  return normalized;
+}
+
+function getExportCellValue(column: ColumnMeta, row: RowRecord, lookups: LookupCache): unknown {
+  const value = row[column.name];
+
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  if (column.foreignKey) {
+    const options = lookups[column.foreignKey.referencesTable] ?? [];
+    const match = options.find((option) => option.value === String(value));
+    return match?.label ?? value;
+  }
+
+  return value;
 }
 
 function getRowTitle(table: TableMeta, row: RowRecord, lookups: LookupCache) {

@@ -518,6 +518,11 @@ th {
   margin-bottom: 18px;
 }
 
+.import-top-actions {
+  margin-bottom: 18px;
+  justify-content: flex-end;
+}
+
 .record-form {
   display: grid;
   gap: 16px;
