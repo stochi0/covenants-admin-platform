@@ -26,6 +26,11 @@ interface ImportState {
   rows: RowRecord[];
 }
 
+interface ImportEditorState {
+  rowIndex: number;
+  formState: FormState;
+}
+
 const PAGE_SIZE = 25;
 
 interface AdminConsoleProps {
@@ -52,6 +57,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [formState, setFormState] = useState<FormState>({});
   const [importState, setImportState] = useState<ImportState | null>(null);
+  const [importEditor, setImportEditor] = useState<ImportEditorState | null>(null);
   const [lookups, setLookups] = useState<LookupCache>({});
   const [facilityRelations, setFacilityRelations] = useState<FacilityRelationsResponse | null>(null);
   const [facilityRelationsDraft, setFacilityRelationsDraft] = useState<FacilityRelationsUpsertRequest | null>(null);
@@ -268,9 +274,70 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
   function closePanels() {
     setEditor(null);
     setImportState(null);
+    setImportEditor(null);
     setFormState({});
     setFacilityRelations(null);
     setFacilityRelationsDraft(null);
+  }
+
+  function openImportEditor(row: RowRecord, rowIndex: number) {
+    if (!selectedTable) {
+      return;
+    }
+
+    setImportEditor({
+      rowIndex,
+      formState: createFormFromColumns(importableColumns, row)
+    });
+  }
+
+  function closeImportEditor() {
+    setImportEditor(null);
+  }
+
+  function handleDeleteImportRow(rowIndex: number) {
+    setImportState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        rows: current.rows.filter((_, index) => index !== rowIndex)
+      };
+    });
+
+    setImportEditor((current) => {
+      if (!current) {
+        return current;
+      }
+
+      if (current.rowIndex === rowIndex) {
+        return null;
+      }
+
+      if (current.rowIndex > rowIndex) {
+        return { ...current, rowIndex: current.rowIndex - 1 };
+      }
+
+      return current;
+    });
+  }
+
+  function handleSaveImportRow(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!importState || !importEditor) {
+      return;
+    }
+
+    const updatedRow = buildRowFromForm(importableColumns, importEditor.formState);
+
+    setImportState({
+      ...importState,
+      rows: importState.rows.map((row, index) => (index === importEditor.rowIndex ? updatedRow : row))
+    });
+    setImportEditor(null);
   }
 
   async function handleSaveRecord(event: FormEvent<HTMLFormElement>) {
@@ -510,6 +577,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
         fileName: file.name,
         rows
       });
+      setImportEditor(null);
       setNotice("");
     } catch (parseError) {
       setError(`Could not read Excel file: ${getErrorMessage(parseError)}`);
@@ -1065,7 +1133,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 <h3>{selectedTable.label}</h3>
                 <p className="dialog-copy">
                   Match spreadsheet headers to database columns. Existing rows are updated when the import matcher
-                  columns line up, and generated IDs and timestamps are ignored.
+                  columns line up, blank cells keep existing values, and generated IDs and timestamps are ignored.
                 </p>
               </div>
               <button className="close-button" onClick={closePanels} type="button">
@@ -1142,7 +1210,8 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
               </div>
             ) : activeImportMatcher ? (
               <div className="helper-note" style={{ marginTop: 12 }}>
-                This file will match existing rows using <code>{activeImportMatcher.join(" + ")}</code>.
+                This file will match existing rows using <code>{activeImportMatcher.join(" + ")}</code>. Non-empty
+                cells update matching rows, while blank cells keep the current value.
               </div>
             ) : null}
 
@@ -1151,22 +1220,121 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 <table>
                   <thead>
                     <tr>
+                      <th>#</th>
                       {previewColumns.map((column) => (
                         <th key={column}>{column}</th>
                       ))}
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {importState.rows.slice(0, 5).map((row, rowIndex) => (
+                    {importState.rows.map((row, rowIndex) => (
                       <tr key={`preview-${rowIndex}`}>
+                        <td>{rowIndex + 1}</td>
                         {previewColumns.map((column) => (
                           <td key={column}>{formatCellValue(row[column])}</td>
                         ))}
+                        <td>
+                          <div className="row-actions">
+                            <button onClick={() => openImportEditor(row, rowIndex)} type="button">
+                              Edit
+                            </button>
+                            <button
+                              className="danger-link"
+                              onClick={() => handleDeleteImportRow(rowIndex)}
+                              type="button"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            ) : null}
+
+            {importEditor && selectedTable ? (
+              <section className="panel import-edit-panel">
+                <div className="dialog-head" style={{ marginBottom: 12 }}>
+                  <div>
+                    <p className="eyebrow">Edit Imported Row</p>
+                    <h3>
+                      {selectedTable.label} Row #{importEditor.rowIndex + 1}
+                    </h3>
+                  </div>
+                  <button className="close-button" onClick={closeImportEditor} type="button">
+                    Close
+                  </button>
+                </div>
+
+                <form className="record-form" onSubmit={handleSaveImportRow}>
+                  <div className="form-grid">
+                    {importableColumns.map((column) => {
+                      const foreignOptions = column.foreignKey ? lookups[column.foreignKey.referencesTable] ?? [] : [];
+
+                      return (
+                        <label className="field" key={`import-${column.name}`}>
+                          <span>
+                            {column.label}
+                            {column.nullable ? " optional" : ""}
+                          </span>
+
+                          {column.foreignKey ? (
+                            <select
+                              value={importEditor.formState[column.name] ?? ""}
+                              onChange={(event) =>
+                                setImportEditor((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        formState: {
+                                          ...current.formState,
+                                          [column.name]: event.target.value
+                                        }
+                                      }
+                                    : current
+                                )
+                              }
+                            >
+                              <option value="">Select {column.label}</option>
+                              {foreignOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            renderFieldInput(column, importEditor.formState[column.name] ?? "", false, (value) =>
+                              setImportEditor((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      formState: {
+                                        ...current.formState,
+                                        [column.name]: value
+                                      }
+                                    }
+                                  : current
+                              )
+                            )
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="dialog-actions">
+                    <button className="ghost-button" onClick={closeImportEditor} type="button">
+                      Cancel
+                    </button>
+                    <button className="primary-button" type="submit">
+                      Save Row
+                    </button>
+                  </div>
+                </form>
+              </section>
             ) : null}
 
             <div className="dialog-actions">
@@ -1257,12 +1425,16 @@ function createEmptyForm(table: TableMeta): FormState {
   );
 }
 
-function createFormFromRow(table: TableMeta, row: RowRecord): FormState {
-  const entries = table.columns
-    .filter((column) => !column.readOnly && !column.hidden && !column.autoGenerated)
-    .map((column) => [column.name, stringifyFormValue(column, row[column.name])]);
-
+function createFormFromColumns(columns: ColumnMeta[], row: RowRecord): FormState {
+  const entries = columns.map((column) => [column.name, stringifyFormValue(column, row[column.name])]);
   return Object.fromEntries(entries);
+}
+
+function createFormFromRow(table: TableMeta, row: RowRecord): FormState {
+  return createFormFromColumns(
+    table.columns.filter((column) => !column.readOnly && !column.hidden && !column.autoGenerated),
+    row
+  );
 }
 
 function stringifyFormValue(column: ColumnMeta, value: unknown): string {
@@ -1309,6 +1481,16 @@ function buildPayload(table: TableMeta, formState: FormState, editor: EditorStat
   }
 
   return payload;
+}
+
+function buildRowFromForm(columns: ColumnMeta[], formState: FormState): RowRecord {
+  const row: RowRecord = {};
+
+  for (const column of columns) {
+    row[column.name] = formState[column.name] ?? "";
+  }
+
+  return row;
 }
 
 function getRowTitle(table: TableMeta, row: RowRecord, lookups: LookupCache) {
