@@ -15,6 +15,7 @@ import type {
 type RowRecord = Record<string, unknown>;
 type FormState = Record<string, string>;
 type LookupCache = Record<string, OptionsResponse["options"]>;
+type RelationSearchKey = "chemistries" | "products" | "accreditations";
 
 interface EditorState {
   mode: "create" | "edit";
@@ -42,6 +43,8 @@ interface AdminConsoleProps {
   onSignOut: () => Promise<void> | void;
 }
 
+const RELATION_SEARCH_RESULT_LIMIT = 6;
+
 export default function AdminConsole({ accessToken, currentUser, onSignOut }: AdminConsoleProps) {
   const [tables, setTables] = useState<TableMeta[]>([]);
   const [selectedTableName, setSelectedTableName] = useState<string>("");
@@ -65,11 +68,107 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
   const [facilityRelations, setFacilityRelations] = useState<FacilityRelationsResponse | null>(null);
   const [facilityRelationsDraft, setFacilityRelationsDraft] = useState<FacilityRelationsUpsertRequest | null>(null);
   const [facilityRelationsLoading, setFacilityRelationsLoading] = useState(false);
+  const [facilityRelationSearch, setFacilityRelationSearch] = useState<Record<RelationSearchKey, string>>({
+    chemistries: "",
+    products: "",
+    accreditations: ""
+  });
 
   const selectedTable = useMemo(
     () => tables.find((table) => table.name === selectedTableName) ?? null,
     [selectedTableName, tables]
   );
+
+  function createEmptyFacilityRelationsDraft(): FacilityRelationsUpsertRequest {
+    return {
+      chemistries: [],
+      products: [],
+      accreditations: []
+    };
+  }
+
+  function updateFacilityRelationsDraft(
+    updater: (current: FacilityRelationsUpsertRequest) => FacilityRelationsUpsertRequest
+  ) {
+    setFacilityRelationsDraft((current) => updater(current ?? createEmptyFacilityRelationsDraft()));
+  }
+
+  function hasDuplicateValues(values: string[]) {
+    const normalized = values.filter(Boolean);
+    return new Set(normalized).size !== normalized.length;
+  }
+
+  function setFacilityRelationSearchValue(key: RelationSearchKey, value: string) {
+    setFacilityRelationSearch((current) => ({
+      ...current,
+      [key]: value
+    }));
+  }
+
+  function getRelationMatches(key: RelationSearchKey, selectedIds: string[]) {
+    const query = facilityRelationSearch[key].trim().toLowerCase();
+    const selected = new Set(selectedIds.filter(Boolean));
+    const availableOptions = (lookups[key] ?? []).filter((option) => !selected.has(option.value));
+
+    if (!query) {
+      return availableOptions.slice(0, RELATION_SEARCH_RESULT_LIMIT);
+    }
+
+    return availableOptions
+      .filter((option) => `${option.label} ${option.value}`.toLowerCase().includes(query))
+      .slice(0, RELATION_SEARCH_RESULT_LIMIT);
+  }
+
+  function addChemistryRelation(chemistryId: string) {
+    if (!chemistryId) {
+      return;
+    }
+
+    updateFacilityRelationsDraft((current) => ({
+      ...current,
+      chemistries: (current.chemistries ?? []).some((entry) => entry.chemistryId === chemistryId)
+        ? current.chemistries ?? []
+        : [...(current.chemistries ?? []), { chemistryId }]
+    }));
+    setFacilityRelationSearchValue("chemistries", "");
+  }
+
+  function addProductRelation(productId: string) {
+    if (!productId) {
+      return;
+    }
+
+    updateFacilityRelationsDraft((current) => ({
+      ...current,
+      products: (current.products ?? []).some((entry) => entry.productId === productId)
+        ? current.products ?? []
+        : [...(current.products ?? []), { productId, isPrimary: false }]
+    }));
+    setFacilityRelationSearchValue("products", "");
+  }
+
+  function addAccreditationRelation(accreditationId: string) {
+    if (!accreditationId) {
+      return;
+    }
+
+    updateFacilityRelationsDraft((current) => ({
+      ...current,
+      accreditations: (current.accreditations ?? []).some((entry) => entry.accreditationId === accreditationId)
+        ? current.accreditations ?? []
+        : [
+            ...(current.accreditations ?? []),
+            {
+              accreditationId,
+              awardingBody: null,
+              certificateNumber: null,
+              awardedAt: null,
+              expiresAt: null
+            }
+          ]
+    }));
+    setFacilityRelationSearchValue("accreditations", "");
+  }
   const foreignTableNames = useMemo(() => {
     if (!selectedTable) {
       return [];
@@ -257,15 +356,12 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     }
 
     setNotice("");
+    setFacilityRelationSearch({ chemistries: "", products: "", accreditations: "" });
     setEditor({ mode: "create", row: null });
     setFormState(createEmptyForm(selectedTable));
     if (selectedTable.name === "facilities") {
       setFacilityRelations(null);
-      setFacilityRelationsDraft({
-        chemistryIds: [],
-        productIds: [],
-        accreditations: []
-      });
+      setFacilityRelationsDraft(createEmptyFacilityRelationsDraft());
       void ensureFacilityRelationOptions();
     } else {
       setFacilityRelations(null);
@@ -279,6 +375,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     }
 
     setNotice("");
+    setFacilityRelationSearch({ chemistries: "", products: "", accreditations: "" });
     setEditor({ mode: "edit", row });
     setFormState(createFormFromRow(selectedTable, row));
 
@@ -300,6 +397,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     setFormState({});
     setFacilityRelations(null);
     setFacilityRelationsDraft(null);
+    setFacilityRelationSearch({ chemistries: "", products: "", accreditations: "" });
   }
 
   function openImportEditor(row: RowRecord, rowIndex: number) {
@@ -406,13 +504,26 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     try {
       setBusy(true);
       setError("");
-      if (
-        selectedTable.name === "facilities" &&
-        facilityRelationsDraft?.accreditations
-      ) {
-        const invalid = facilityRelationsDraft.accreditations.some((row) => !row.accreditationId);
-        if (invalid) {
+      if (selectedTable.name === "facilities" && facilityRelationsDraft) {
+        if (facilityRelationsDraft.chemistries?.some((row) => !row.chemistryId)) {
+          throw new Error("Each chemistry row must select a chemistry.");
+        }
+        if (facilityRelationsDraft.products?.some((row) => !row.productId)) {
+          throw new Error("Each product row must select a product.");
+        }
+        if (facilityRelationsDraft.accreditations?.some((row) => !row.accreditationId)) {
           throw new Error("Each accreditation row must select an accreditation.");
+        }
+        if (hasDuplicateValues((facilityRelationsDraft.chemistries ?? []).map((row) => row.chemistryId))) {
+          throw new Error("A facility cannot include the same chemistry more than once.");
+        }
+        if (hasDuplicateValues((facilityRelationsDraft.products ?? []).map((row) => row.productId))) {
+          throw new Error("A facility cannot include the same product more than once.");
+        }
+        if (
+          hasDuplicateValues((facilityRelationsDraft.accreditations ?? []).map((row) => row.accreditationId))
+        ) {
+          throw new Error("A facility cannot include the same accreditation more than once.");
         }
       }
       const payload = buildPayload(selectedTable, formState, editor);
@@ -460,8 +571,13 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       const data = await api<FacilityRelationsResponse>(accessToken, `/api/facilities/${facilityId}/relations`);
       setFacilityRelations(data);
       setFacilityRelationsDraft({
-        chemistryIds: data.chemistryIds,
-        productIds: data.productIds,
+        chemistries: data.chemistries.map((row) => ({
+          chemistryId: row.chemistryId
+        })),
+        products: data.products.map((row) => ({
+          productId: row.productId,
+          isPrimary: row.isPrimary
+        })),
         accreditations: data.accreditations.map((row) => ({
           accreditationId: row.accreditationId,
           awardingBody: row.awardingBody,
@@ -951,77 +1067,336 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 <div className="auto-managed-note">
                   <strong>Facility relations</strong>
                   <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-                    <label className="field">
-                      <span>Chemistries</span>
-                      <select
-                        multiple
-                        disabled={busy || facilityRelationsLoading}
-                        value={facilityRelationsDraft?.chemistryIds ?? []}
-                        onChange={(event) => {
-                          const values = Array.from(event.target.selectedOptions).map((opt) => opt.value);
-                          setFacilityRelationsDraft((current) => ({
-                            ...(current ?? {}),
-                            chemistryIds: values
-                          }));
-                        }}
-                      >
-                        {(lookups.chemistries ?? []).map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <div className="panel" style={{ padding: 12 }}>
+                      <strong>Chemistries</strong>
 
-                    <label className="field">
-                      <span>Products</span>
-                      <select
-                        multiple
-                        disabled={busy || facilityRelationsLoading}
-                        value={facilityRelationsDraft?.productIds ?? []}
-                        onChange={(event) => {
-                          const values = Array.from(event.target.selectedOptions).map((opt) => opt.value);
-                          setFacilityRelationsDraft((current) => ({
-                            ...(current ?? {}),
-                            productIds: values
-                          }));
-                        }}
-                      >
-                        {(lookups.products ?? []).map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <div className="relation-picker">
+                        <label className="field" style={{ margin: 0 }}>
+                          <span>Search and add chemistry</span>
+                          <input
+                            disabled={busy || facilityRelationsLoading}
+                            type="search"
+                            placeholder="Type a chemistry name"
+                            value={facilityRelationSearch.chemistries}
+                            onChange={(event) => setFacilityRelationSearchValue("chemistries", event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                const matches = getRelationMatches(
+                                  "chemistries",
+                                  (facilityRelationsDraft?.chemistries ?? []).map((entry) => entry.chemistryId)
+                                );
+                                if (matches[0]) {
+                                  event.preventDefault();
+                                  addChemistryRelation(matches[0].value);
+                                }
+                              }
+                            }}
+                          />
+                        </label>
+
+                        {getRelationMatches(
+                          "chemistries",
+                          (facilityRelationsDraft?.chemistries ?? []).map((entry) => entry.chemistryId)
+                        ).length > 0 ? (
+                          <div className="relation-suggestions">
+                            {getRelationMatches(
+                              "chemistries",
+                              (facilityRelationsDraft?.chemistries ?? []).map((entry) => entry.chemistryId)
+                            ).map((option) => (
+                              <button
+                                key={option.value}
+                                className="relation-suggestion"
+                                type="button"
+                                disabled={busy || facilityRelationsLoading}
+                                onClick={() => addChemistryRelation(option.value)}
+                              >
+                                <span>{option.label}</span>
+                                <strong>Add</strong>
+                              </button>
+                            ))}
+                          </div>
+                        ) : facilityRelationSearch.chemistries.trim() ? (
+                          <p className="helper-note">No chemistry matches your search.</p>
+                        ) : null}
+                      </div>
+
+                      {facilityRelationsLoading && !facilityRelations ? (
+                        <p className="helper-note" style={{ marginTop: 8 }}>
+                          Loading facility relations…
+                        </p>
+                      ) : null}
+
+                      {(facilityRelationsDraft?.chemistries ?? []).length === 0 ? (
+                        <p className="helper-note" style={{ marginTop: 8 }}>
+                          No chemistries yet.
+                        </p>
+                      ) : (
+                        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                          {(facilityRelationsDraft?.chemistries ?? []).map((row, index) => (
+                            <div
+                              key={`chem-${index}`}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "minmax(0, 1fr) auto",
+                                gap: 8,
+                                alignItems: "end"
+                              }}
+                            >
+                              <label className="field" style={{ margin: 0 }}>
+                                <span>Chemistry</span>
+                                <select
+                                  disabled={busy || facilityRelationsLoading}
+                                  value={row.chemistryId}
+                                  onChange={(event) => {
+                                    const chemistryId = event.target.value;
+                                    updateFacilityRelationsDraft((current) => ({
+                                      ...current,
+                                      chemistries: (current.chemistries ?? []).map((entry, entryIndex) =>
+                                        entryIndex === index ? { ...entry, chemistryId } : entry
+                                      )
+                                    }));
+                                  }}
+                                >
+                                  <option value="">Select chemistry</option>
+                                  {(lookups.chemistries ?? []).map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <button
+                                className="danger-link"
+                                type="button"
+                                disabled={busy || facilityRelationsLoading}
+                                onClick={() =>
+                                  updateFacilityRelationsDraft((current) => ({
+                                    ...current,
+                                    chemistries: (current.chemistries ?? []).filter(
+                                      (_entry, entryIndex) => entryIndex !== index
+                                    )
+                                  }))
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {facilityRelationsDraft?.chemistries?.some((row) => !row.chemistryId) ? (
+                        <p className="helper-note" style={{ marginTop: 8 }}>
+                          Tip: each chemistry row must select a chemistry before saving.
+                        </p>
+                      ) : null}
+                    </div>
 
                     <div className="panel" style={{ padding: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                        <strong>Accreditations</strong>
-                        <button
-                          className="ghost-button"
-                          type="button"
-                          disabled={busy || facilityRelationsLoading}
-                          onClick={() =>
-                            setFacilityRelationsDraft((current) => ({
-                              ...(current ?? {}),
-                              accreditations: [
-                                ...((current?.accreditations ?? []) as NonNullable<
-                                  FacilityRelationsUpsertRequest["accreditations"]
-                                >),
-                                {
-                                  accreditationId: "",
-                                  awardingBody: null,
-                                  certificateNumber: null,
-                                  awardedAt: null,
-                                  expiresAt: null
+                      <strong>Products</strong>
+
+                      <div className="relation-picker">
+                        <label className="field" style={{ margin: 0 }}>
+                          <span>Search and add product</span>
+                          <input
+                            disabled={busy || facilityRelationsLoading}
+                            type="search"
+                            placeholder="Type a product name"
+                            value={facilityRelationSearch.products}
+                            onChange={(event) => setFacilityRelationSearchValue("products", event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                const matches = getRelationMatches(
+                                  "products",
+                                  (facilityRelationsDraft?.products ?? []).map((entry) => entry.productId)
+                                );
+                                if (matches[0]) {
+                                  event.preventDefault();
+                                  addProductRelation(matches[0].value);
                                 }
-                              ]
-                            }))
-                          }
-                        >
-                          Add accreditation
-                        </button>
+                              }
+                            }}
+                          />
+                        </label>
+
+                        {getRelationMatches(
+                          "products",
+                          (facilityRelationsDraft?.products ?? []).map((entry) => entry.productId)
+                        ).length > 0 ? (
+                          <div className="relation-suggestions">
+                            {getRelationMatches(
+                              "products",
+                              (facilityRelationsDraft?.products ?? []).map((entry) => entry.productId)
+                            ).map((option) => (
+                              <button
+                                key={option.value}
+                                className="relation-suggestion"
+                                type="button"
+                                disabled={busy || facilityRelationsLoading}
+                                onClick={() => addProductRelation(option.value)}
+                              >
+                                <span>{option.label}</span>
+                                <strong>Add</strong>
+                              </button>
+                            ))}
+                          </div>
+                        ) : facilityRelationSearch.products.trim() ? (
+                          <p className="helper-note">No product matches your search.</p>
+                        ) : null}
+                      </div>
+
+                      {facilityRelationsLoading && !facilityRelations ? (
+                        <p className="helper-note" style={{ marginTop: 8 }}>
+                          Loading facility relations…
+                        </p>
+                      ) : null}
+
+                      {(facilityRelationsDraft?.products ?? []).length === 0 ? (
+                        <p className="helper-note" style={{ marginTop: 8 }}>
+                          No products yet.
+                        </p>
+                      ) : (
+                        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                          {(facilityRelationsDraft?.products ?? []).map((row, index) => (
+                            <div
+                              key={`prod-${index}`}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                                gap: 8,
+                                alignItems: "end"
+                              }}
+                            >
+                              <label className="field" style={{ margin: 0 }}>
+                                <span>Product</span>
+                                <select
+                                  disabled={busy || facilityRelationsLoading}
+                                  value={row.productId}
+                                  onChange={(event) => {
+                                    const productId = event.target.value;
+                                    updateFacilityRelationsDraft((current) => ({
+                                      ...current,
+                                      products: (current.products ?? []).map((entry, entryIndex) =>
+                                        entryIndex === index ? { ...entry, productId } : entry
+                                      )
+                                    }));
+                                  }}
+                                >
+                                  <option value="">Select product</option>
+                                  {(lookups.products ?? []).map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label
+                                className="field"
+                                style={{ margin: 0, minWidth: 110, display: "grid", gap: 8, alignItems: "center" }}
+                              >
+                                <span>Primary</span>
+                                <input
+                                  disabled={busy || facilityRelationsLoading}
+                                  type="checkbox"
+                                  checked={row.isPrimary}
+                                  onChange={(event) => {
+                                    const isPrimary = event.target.checked;
+                                    updateFacilityRelationsDraft((current) => ({
+                                      ...current,
+                                      products: (current.products ?? []).map((entry, entryIndex) =>
+                                        entryIndex === index ? { ...entry, isPrimary } : entry
+                                      )
+                                    }));
+                                  }}
+                                />
+                              </label>
+
+                              <button
+                                className="danger-link"
+                                type="button"
+                                disabled={busy || facilityRelationsLoading}
+                                onClick={() =>
+                                  updateFacilityRelationsDraft((current) => ({
+                                    ...current,
+                                    products: (current.products ?? []).filter(
+                                      (_entry, entryIndex) => entryIndex !== index
+                                    )
+                                  }))
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {facilityRelationsDraft?.products?.some((row) => !row.productId) ? (
+                        <p className="helper-note" style={{ marginTop: 8 }}>
+                          Tip: each product row must select a product before saving.
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="panel" style={{ padding: 12 }}>
+                      <strong>Accreditations</strong>
+
+                      <div className="relation-picker">
+                        <label className="field" style={{ margin: 0 }}>
+                          <span>Search and add accreditation</span>
+                          <input
+                            disabled={busy || facilityRelationsLoading}
+                            type="search"
+                            placeholder="Type an accreditation name"
+                            value={facilityRelationSearch.accreditations}
+                            onChange={(event) =>
+                              setFacilityRelationSearchValue("accreditations", event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                const matches = getRelationMatches(
+                                  "accreditations",
+                                  (facilityRelationsDraft?.accreditations ?? []).map(
+                                    (entry) => entry.accreditationId
+                                  )
+                                );
+                                if (matches[0]) {
+                                  event.preventDefault();
+                                  addAccreditationRelation(matches[0].value);
+                                }
+                              }
+                            }}
+                          />
+                        </label>
+
+                        {getRelationMatches(
+                          "accreditations",
+                          (facilityRelationsDraft?.accreditations ?? []).map((entry) => entry.accreditationId)
+                        ).length > 0 ? (
+                          <div className="relation-suggestions">
+                            {getRelationMatches(
+                              "accreditations",
+                              (facilityRelationsDraft?.accreditations ?? []).map(
+                                (entry) => entry.accreditationId
+                              )
+                            ).map((option) => (
+                              <button
+                                key={option.value}
+                                className="relation-suggestion"
+                                type="button"
+                                disabled={busy || facilityRelationsLoading}
+                                onClick={() => addAccreditationRelation(option.value)}
+                              >
+                                <span>{option.label}</span>
+                                <strong>Add</strong>
+                              </button>
+                            ))}
+                          </div>
+                        ) : facilityRelationSearch.accreditations.trim() ? (
+                          <p className="helper-note">No accreditation matches your search.</p>
+                        ) : null}
                       </div>
 
                       {facilityRelationsLoading && !facilityRelations ? (
@@ -1053,9 +1428,9 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                                   value={row.accreditationId}
                                   onChange={(event) => {
                                     const accreditationId = event.target.value;
-                                    setFacilityRelationsDraft((current) => ({
-                                      ...(current ?? {}),
-                                      accreditations: (current?.accreditations ?? []).map((entry, entryIndex) =>
+                                    updateFacilityRelationsDraft((current) => ({
+                                      ...current,
+                                      accreditations: (current.accreditations ?? []).map((entry, entryIndex) =>
                                         entryIndex === index ? { ...entry, accreditationId } : entry
                                       )
                                     }));
@@ -1078,9 +1453,9 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                                   value={row.awardingBody ?? ""}
                                   onChange={(event) => {
                                     const awardingBody = event.target.value || null;
-                                    setFacilityRelationsDraft((current) => ({
-                                      ...(current ?? {}),
-                                      accreditations: (current?.accreditations ?? []).map((entry, entryIndex) =>
+                                    updateFacilityRelationsDraft((current) => ({
+                                      ...current,
+                                      accreditations: (current.accreditations ?? []).map((entry, entryIndex) =>
                                         entryIndex === index ? { ...entry, awardingBody } : entry
                                       )
                                     }));
@@ -1096,9 +1471,9 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                                   value={row.certificateNumber ?? ""}
                                   onChange={(event) => {
                                     const certificateNumber = event.target.value || null;
-                                    setFacilityRelationsDraft((current) => ({
-                                      ...(current ?? {}),
-                                      accreditations: (current?.accreditations ?? []).map((entry, entryIndex) =>
+                                    updateFacilityRelationsDraft((current) => ({
+                                      ...current,
+                                      accreditations: (current.accreditations ?? []).map((entry, entryIndex) =>
                                         entryIndex === index ? { ...entry, certificateNumber } : entry
                                       )
                                     }));
@@ -1114,9 +1489,9 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                                   value={row.awardedAt ?? ""}
                                   onChange={(event) => {
                                     const awardedAt = event.target.value || null;
-                                    setFacilityRelationsDraft((current) => ({
-                                      ...(current ?? {}),
-                                      accreditations: (current?.accreditations ?? []).map((entry, entryIndex) =>
+                                    updateFacilityRelationsDraft((current) => ({
+                                      ...current,
+                                      accreditations: (current.accreditations ?? []).map((entry, entryIndex) =>
                                         entryIndex === index ? { ...entry, awardedAt } : entry
                                       )
                                     }));
@@ -1132,9 +1507,9 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                                   value={row.expiresAt ?? ""}
                                   onChange={(event) => {
                                     const expiresAt = event.target.value || null;
-                                    setFacilityRelationsDraft((current) => ({
-                                      ...(current ?? {}),
-                                      accreditations: (current?.accreditations ?? []).map((entry, entryIndex) =>
+                                    updateFacilityRelationsDraft((current) => ({
+                                      ...current,
+                                      accreditations: (current.accreditations ?? []).map((entry, entryIndex) =>
                                         entryIndex === index ? { ...entry, expiresAt } : entry
                                       )
                                     }));
@@ -1147,9 +1522,9 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                                 type="button"
                                 disabled={busy || facilityRelationsLoading}
                                 onClick={() =>
-                                  setFacilityRelationsDraft((current) => ({
-                                    ...(current ?? {}),
-                                    accreditations: (current?.accreditations ?? []).filter(
+                                  updateFacilityRelationsDraft((current) => ({
+                                    ...current,
+                                    accreditations: (current.accreditations ?? []).filter(
                                       (_entry, entryIndex) => entryIndex !== index
                                     )
                                   }))

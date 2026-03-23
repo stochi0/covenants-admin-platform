@@ -321,7 +321,7 @@ export async function getFacilityRelations(facilityId: string): Promise<Facility
       .eq("facility_id", facilityId),
     supabase
       .from("facility_products")
-      .select("product_id")
+      .select("product_id,is_primary")
       .eq("facility_id", facilityId),
     supabase
       .from("facility_accreditations")
@@ -341,8 +341,16 @@ export async function getFacilityRelations(facilityId: string): Promise<Facility
 
   return {
     facilityId,
-    chemistryIds: (chemistries.data ?? []).map((row) => String((row as { chemistry_id: unknown }).chemistry_id)),
-    productIds: (products.data ?? []).map((row) => String((row as { product_id: unknown }).product_id)),
+    chemistries: (chemistries.data ?? []).map((row) => ({
+      chemistryId: String((row as { chemistry_id: unknown }).chemistry_id)
+    })),
+    products: (products.data ?? []).map((row) => {
+      const typed = row as { product_id: unknown; is_primary: unknown };
+      return {
+        productId: String(typed.product_id),
+        isPrimary: Boolean(typed.is_primary)
+      };
+    }),
     accreditations: (accreditations.data ?? []).map((row) => {
       const typed = row as {
         accreditation_id: unknown;
@@ -366,7 +374,7 @@ export async function upsertFacilityRelations(
   facilityId: string,
   payload: FacilityRelationsUpsertRequest
 ): Promise<FacilityRelationsResponse> {
-  if (payload.chemistryIds) {
+  if (payload.chemistries) {
     const { error: deleteError } = await supabase
       .from("facility_chemistries")
       .delete()
@@ -375,9 +383,9 @@ export async function upsertFacilityRelations(
       throw new Error(deleteError.message);
     }
 
-    const rows = payload.chemistryIds.map((chemistryId) => ({
+    const rows = payload.chemistries.map((chemistry) => ({
       facility_id: facilityId,
-      chemistry_id: chemistryId
+      chemistry_id: chemistry.chemistryId
     }));
 
     if (rows.length > 0) {
@@ -388,7 +396,7 @@ export async function upsertFacilityRelations(
     }
   }
 
-  if (payload.productIds) {
+  if (payload.products) {
     const { error: deleteError } = await supabase
       .from("facility_products")
       .delete()
@@ -397,9 +405,10 @@ export async function upsertFacilityRelations(
       throw new Error(deleteError.message);
     }
 
-    const rows = payload.productIds.map((productId) => ({
+    const rows = payload.products.map((product) => ({
       facility_id: facilityId,
-      product_id: productId
+      product_id: product.productId,
+      is_primary: product.isPrimary
     }));
 
     if (rows.length > 0) {

@@ -65,22 +65,33 @@ export interface OptionsResponse {
   }>;
 }
 
+export interface FacilityChemistryRelation {
+  chemistryId: string;
+}
+
+export interface FacilityProductRelation {
+  productId: string;
+  isPrimary: boolean;
+}
+
+export interface FacilityAccreditationRelation {
+  accreditationId: string;
+  awardingBody: string | null;
+  certificateNumber: string | null;
+  awardedAt: string | null;
+  expiresAt: string | null;
+}
+
 export interface FacilityRelationsResponse {
   facilityId: string;
-  chemistryIds: string[];
-  productIds: string[];
-  accreditations: Array<{
-    accreditationId: string;
-    awardingBody: string | null;
-    certificateNumber: string | null;
-    awardedAt: string | null;
-    expiresAt: string | null;
-  }>;
+  chemistries: FacilityChemistryRelation[];
+  products: FacilityProductRelation[];
+  accreditations: FacilityAccreditationRelation[];
 }
 
 export interface FacilityRelationsUpsertRequest {
-  chemistryIds?: string[];
-  productIds?: string[];
+  chemistries?: FacilityChemistryRelation[];
+  products?: FacilityProductRelation[];
   accreditations?: Array<{
     accreditationId: string;
     awardingBody?: string | null;
