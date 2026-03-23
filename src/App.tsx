@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 
@@ -18,6 +18,11 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState("");
+  const currentUserRef = useRef<AuthorizedUser | null>(null);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   useEffect(() => {
     let active = true;
@@ -43,7 +48,7 @@ export default function App() {
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) {
         return;
       }
@@ -55,7 +60,14 @@ export default function App() {
         return;
       }
 
-      void hydrateAuthorizedUser(session, active);
+      setAccessToken(session.access_token);
+
+      if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
+        return;
+      }
+
+      const sameUser = currentUserRef.current?.id === session.user.id;
+      void hydrateAuthorizedUser(session, active, { showBooting: !sameUser });
     });
 
     return () => {
@@ -64,9 +76,18 @@ export default function App() {
     };
   }, []);
 
-  async function hydrateAuthorizedUser(session: Session, active: boolean) {
+  async function hydrateAuthorizedUser(
+    session: Session,
+    active: boolean,
+    options?: { showBooting?: boolean }
+  ) {
+    const showBooting = options?.showBooting ?? true;
+
     try {
-      setBooting(true);
+      if (showBooting) {
+        setBooting(true);
+      }
+
       setAuthError("");
 
       const user = await fetchAuthorizedUser(session.access_token);
@@ -88,7 +109,7 @@ export default function App() {
       setAuthError(message);
       await supabase.auth.signOut();
     } finally {
-      if (active) {
+      if (active && showBooting) {
         setBooting(false);
       }
     }
