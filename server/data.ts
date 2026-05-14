@@ -1,7 +1,4 @@
-import crypto from "node:crypto";
-
 import type {
-  AuthStatusResponse,
   FacilityRelationsResponse,
   FacilityRelationsUpsertRequest,
   ImportResponse,
@@ -24,6 +21,10 @@ export async function listRecords(
 ): Promise<RecordsResponse> {
   const table = getTableOrThrow(tableName);
   let query = supabase.from(table.name).select("*", { count: "exact" });
+
+  if (table.name === "facilities") {
+    query = query.is("deleted_at", null);
+  }
 
   if (options.search && table.searchableColumns.length > 0) {
     const filters = await buildSearchFilters(table, options.search);
@@ -142,8 +143,8 @@ export async function createRecord(
 ): Promise<Record<string, unknown>> {
   const table = getTableOrThrow(tableName);
 
-  if (table.specialHandler === "users") {
-    return createUserRecord(record);
+  if (table.readOnly) {
+    throw new Error(`${table.label} is read-only.`);
   }
 
   const payload = await prepareRecordForPersist(table, sanitizeRecord(table, record, "create"));
@@ -166,8 +167,8 @@ export async function updateRecord(
 ): Promise<Record<string, unknown>> {
   const table = getTableOrThrow(tableName);
 
-  if (table.specialHandler === "users") {
-    return updateUserRecord(record);
+  if (table.readOnly) {
+    throw new Error(`${table.label} is read-only.`);
   }
 
   const keys = extractPrimaryKeys(table, record);
@@ -189,8 +190,25 @@ export async function updateRecord(
 export async function deleteRecord(tableName: string, record: RecordInput): Promise<void> {
   const table = getTableOrThrow(tableName);
 
-  if (table.specialHandler === "users") {
-    await deleteUserRecord(record);
+  if (table.readOnly) {
+    throw new Error(`${table.label} is read-only.`);
+  }
+
+  if (table.name === "facilities") {
+    const keys = extractPrimaryKeys(table, record);
+    let query = supabase
+      .from(table.name)
+      .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .select("id");
+
+    for (const [column, value] of Object.entries(keys)) {
+      query = query.eq(column, value as never);
+    }
+
+    const { error } = await query.single();
+    if (error) {
+      throw new Error(error.message);
+    }
     return;
   }
 
@@ -216,17 +234,8 @@ export async function importRecords(
   let created = 0;
   let updated = 0;
 
-  if (table.specialHandler === "users") {
-    for (const row of filteredRows) {
-      const action = await importUserRecord(row);
-      if (action === "created") {
-        created += 1;
-      } else {
-        updated += 1;
-      }
-    }
-
-    return { processed: created + updated, created, updated };
+  if (table.readOnly) {
+    throw new Error(`${table.label} is read-only.`);
   }
 
   for (const row of filteredRows) {
@@ -964,205 +973,6 @@ function normalizeValue(
   return typeof value === "string" ? normalizeTextValue(value) : value;
 }
 
-async function createUserRecord(record: RecordInput) {
-  const email = asOptionalString(record.email);
-  const fullName = asOptionalString(record.full_name);
-  const role = asOptionalString(record.role) ?? "viewer";
-  const password = asOptionalString(record.password) ?? createTemporaryPassword();
-
-  if (!email) {
-    throw new Error('Users require an "email" value.');
-  }
-
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: {
-      ...(fullName ? { full_name: fullName } : {}),
-      role
-    }
-  });
-
-  if (authError) {
-    throw new Error(authError.message);
-  }
-
-  const payload = {
-    id: authData.user.id,
-    email,
-    full_name: fullName ?? null,
-    role,
-    updated_at: new Date().toISOString()
-  };
-
-  const { data, error } = await supabase
-    .from("users")
-    .upsert(payload, { onConflict: "id" })
-    .select("*")
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
-}
-
-async function updateUserRecord(record: RecordInput) {
-  const id = asOptionalString(record.id);
-
-  if (!id) {
-    throw new Error('Users require an "id" value for updates.');
-  }
-
-  const email = asOptionalString(record.email);
-  const fullName = asOptionalString(record.full_name);
-  const role = asOptionalString(record.role);
-  const password = asOptionalString(record.password);
-
-  const authPayload: {
-    email?: string;
-    password?: string;
-    user_metadata?: { full_name?: string | null; role?: string };
-  } = {};
-
-  if (email) {
-    authPayload.email = email;
-  }
-
-  if (password) {
-    authPayload.password = password;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(record, "full_name") || Object.prototype.hasOwnProperty.call(record, "role")) {
-    authPayload.user_metadata = {
-      ...(Object.prototype.hasOwnProperty.call(record, "full_name") ? { full_name: fullName ?? null } : {}),
-      ...(Object.prototype.hasOwnProperty.call(record, "role") ? { role: role ?? "viewer" } : {})
-    };
-  }
-
-  if (Object.keys(authPayload).length > 0) {
-    const { error: authError } = await supabase.auth.admin.updateUserById(id, authPayload);
-    if (authError) {
-      throw new Error(authError.message);
-    }
-  }
-
-  const payload: RecordInput = {
-    id,
-    updated_at: new Date().toISOString()
-  };
-
-  if (Object.prototype.hasOwnProperty.call(record, "email")) {
-    payload.email = email ?? null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(record, "full_name")) {
-    payload.full_name = fullName ?? null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(record, "role")) {
-    payload.role = role ?? "viewer";
-  }
-
-  const { data, error } = await supabase
-    .from("users")
-    .upsert(payload, { onConflict: "id" })
-    .select("*")
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
-}
-
-async function importUserRecord(record: RecordInput): Promise<"created" | "updated"> {
-  const email = asOptionalString(record.email);
-
-  if (!email) {
-    throw new Error('Users import requires an "email" value to match existing users.');
-  }
-
-  const { data, error } = await supabase.from("users").select("*").ilike("email", email).limit(2);
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if ((data ?? []).length > 1) {
-    throw new Error(`Import row matched multiple users for email "${email}". Clean up duplicates before importing again.`);
-  }
-
-  if (data && data.length === 1) {
-    const existingUser = data[0] as unknown as RecordInput;
-    const mergedUser = mergeImportedUserRecord(existingUser, record);
-    await updateUserRecord({ id: existingUser.id, ...mergedUser });
-    return "updated";
-  }
-
-  await createUserRecord(record);
-  return "created";
-}
-
-function mergeImportedUserRecord(existingUser: RecordInput, importedRecord: RecordInput): RecordInput {
-  const payload: RecordInput = {};
-
-  const fullName = asOptionalString(importedRecord.full_name);
-  if (fullName) {
-    payload.full_name = fullName;
-  }
-
-  const role = asOptionalString(importedRecord.role);
-  if (role) {
-    payload.role = role;
-  }
-
-  const password = asOptionalString(importedRecord.password);
-  if (password) {
-    payload.password = password;
-  }
-
-  const email = asOptionalString(importedRecord.email) ?? asOptionalString(existingUser.email);
-  if (email) {
-    payload.email = email;
-  }
-
-  return payload;
-}
-
-async function deleteUserRecord(record: RecordInput) {
-  const id = asOptionalString(record.id);
-
-  if (!id) {
-    throw new Error('Users require an "id" value for deletes.');
-  }
-
-  const { error: profileError } = await supabase.from("users").delete().eq("id", id);
-  if (profileError) {
-    throw new Error(profileError.message);
-  }
-
-  const { error: authError } = await supabase.auth.admin.deleteUser(id);
-  if (authError) {
-    throw new Error(authError.message);
-  }
-}
-
-function createTemporaryPassword() {
-  return `Tmp-${crypto.randomBytes(12).toString("base64url")}9!`;
-}
-
-function asOptionalString(value: unknown): string | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  const normalized = String(value).trim();
-  return normalized.length > 0 ? normalized : undefined;
-}
-
 function createOptionLabel(
   row: Record<string, unknown>,
   primaryKey: string,
@@ -1176,29 +986,6 @@ function createOptionLabel(
 
   const fallback = String(row[primaryKey] ?? "");
   return fallback ? "Unnamed record" : "Unnamed record";
-}
-
-export async function getAuthorizedUserById(id: string): Promise<AuthStatusResponse["user"]> {
-  const { data, error } = await supabase
-    .from("users")
-    .select("id,email,full_name,role")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if (!data) {
-    throw new Error("You are authenticated, but not authorized to access this admin platform.");
-  }
-
-  return {
-    id: String(data.id),
-    email: data.email ? String(data.email) : null,
-    fullName: data.full_name ? String(data.full_name) : null,
-    role: data.role ? String(data.role) : "viewer"
-  };
 }
 
 function escapeForIlike(value: string) {

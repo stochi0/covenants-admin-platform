@@ -1,12 +1,10 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
-import type { NextFunction, Request, Response } from "express";
 
 import {
   createRecord,
   deleteRecord,
-  getAuthorizedUserById,
   getFacilityRelations,
   getOptions,
   getTables,
@@ -15,36 +13,16 @@ import {
   upsertFacilityRelations,
   updateRecord
 } from "./data.js";
-import { supabase } from "./supabase.js";
 
 dotenv.config();
 
 export const app = express();
-const allowedAdminRoles = new Set(["admin"]);
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
-});
-
-app.use("/api", (req, res, next) => {
-  if (req.path === "/health") {
-    next();
-    return;
-  }
-
-  void authenticateRequest(req, res, next);
-});
-
-app.get("/api/auth/me", async (req, res) => {
-  if (!req.authUser) {
-    res.status(401).json({ error: "Authentication required." });
-    return;
-  }
-
-  res.json({ user: req.authUser });
 });
 
 app.get("/api/schema", (_req, res) => {
@@ -138,64 +116,4 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   }
 
   return Math.min(Math.max(parsed, min), max);
-}
-
-async function authenticateRequest(req: Request, res: Response, next: NextFunction) {
-  try {
-    const token = getBearerToken(req);
-
-    if (!token) {
-      res.status(401).json({ error: "Authentication required." });
-      return;
-    }
-
-    const {
-      data: { user },
-      error
-    } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
-      res.status(401).json({ error: "Your session is invalid or has expired." });
-      return;
-    }
-
-    req.authUser = await getAuthorizedUserById(user.id);
-
-    if (!allowedAdminRoles.has(req.authUser.role)) {
-      res.status(403).json({ error: "Your account does not have an admin role for this platform." });
-      return;
-    }
-
-    next();
-  } catch (error) {
-    res.status(403).json({ error: getErrorMessage(error) });
-  }
-}
-
-function getBearerToken(req: Request) {
-  const authorization = req.headers.authorization;
-
-  if (!authorization) {
-    return null;
-  }
-
-  const [scheme, token] = authorization.split(" ");
-  if (scheme?.toLowerCase() !== "bearer" || !token) {
-    return null;
-  }
-
-  return token;
-}
-
-declare global {
-  namespace Express {
-    interface Request {
-      authUser?: {
-        id: string;
-        email: string | null;
-        fullName: string | null;
-        role: string;
-      };
-    }
-  }
 }

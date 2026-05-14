@@ -8,8 +8,7 @@ import type {
   OptionsResponse,
   RecordsResponse,
   SchemaResponse,
-  TableMeta,
-  AuthorizedUser
+  TableMeta
 } from "../shared/types";
 
 type RowRecord = Record<string, unknown>;
@@ -37,15 +36,9 @@ interface ImportEditorState {
 
 const PAGE_SIZE = 25;
 
-interface AdminConsoleProps {
-  accessToken: string;
-  currentUser: AuthorizedUser;
-  onSignOut: () => Promise<void> | void;
-}
-
 const RELATION_SEARCH_RESULT_LIMIT = 6;
 
-export default function AdminConsole({ accessToken, currentUser, onSignOut }: AdminConsoleProps) {
+export default function AdminConsole() {
   const [tables, setTables] = useState<TableMeta[]>([]);
   const [selectedTableName, setSelectedTableName] = useState<string>("");
   const [records, setRecords] = useState<RowRecord[]>([]);
@@ -190,7 +183,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     setLoadingRecords(true);
     setError("");
 
-    void api<RecordsResponse>(accessToken,
+    void api<RecordsResponse>(
       `/api/records/${selectedTable.name}?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}&search=${encodeURIComponent(
         appliedSearch
       )}`,
@@ -212,7 +205,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       });
 
     return () => controller.abort();
-  }, [accessToken, appliedSearch, page, selectedTable]);
+  }, [appliedSearch, page, selectedTable]);
 
   useEffect(() => {
     if (!selectedTable || foreignTableNames.length === 0) {
@@ -224,7 +217,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
         continue;
       }
 
-      void api<OptionsResponse>(accessToken, `/api/options/${foreignTable}`)
+      void api<OptionsResponse>(`/api/options/${foreignTable}`)
         .then((data) => {
           setLookups((current) => ({ ...current, [foreignTable]: data.options }));
         })
@@ -247,6 +240,10 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
   const editableColumns = useMemo(() => {
     if (!selectedTable) {
       return [];
+    }
+
+    if (selectedTable.readOnly) {
+      return selectedTable.columns.filter((column) => !column.hidden);
     }
 
     return selectedTable.columns.filter((column) => !column.readOnly && !column.hidden);
@@ -332,7 +329,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
   async function loadSchema() {
     try {
       setLoadingSchema(true);
-      const data = await api<SchemaResponse>(accessToken, "/api/schema");
+      const data = await api<SchemaResponse>("/api/schema");
       setTables(data.tables);
       if (data.tables.length > 0) {
         setSelectedTableName(data.tables[0].name);
@@ -502,6 +499,10 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     }
 
     try {
+      if (selectedTable.readOnly) {
+        throw new Error(`${selectedTable.label} is read-only.`);
+      }
+
       setBusy(true);
       setError("");
       if (selectedTable.name === "facilities" && facilityRelationsDraft) {
@@ -528,7 +529,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       }
       const payload = buildPayload(selectedTable, formState, editor);
       const method = editor.mode === "create" ? "POST" : "PATCH";
-      const savedRow = await api<RowRecord>(accessToken, `/api/records/${selectedTable.name}`, {
+      const savedRow = await api<RowRecord>(`/api/records/${selectedTable.name}`, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -540,7 +541,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
         String(savedRow.id ?? editor.row?.id ?? "")
       ) {
         const facilityId = String(savedRow.id ?? editor.row?.id ?? "");
-        await api<FacilityRelationsResponse>(accessToken, `/api/facilities/${facilityId}/relations`, {
+        await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(facilityRelationsDraft)
@@ -568,7 +569,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
 
       await ensureFacilityRelationOptions();
 
-      const data = await api<FacilityRelationsResponse>(accessToken, `/api/facilities/${facilityId}/relations`);
+      const data = await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`);
       setFacilityRelations(data);
       setFacilityRelationsDraft({
         chemistries: data.chemistries.map((row) => ({
@@ -599,7 +600,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
       needed
         .filter((tableName) => !lookups[tableName])
         .map(async (tableName) => {
-          const data = await api<OptionsResponse>(accessToken, `/api/options/${tableName}`);
+          const data = await api<OptionsResponse>(`/api/options/${tableName}`);
           setLookups((current) => ({ ...current, [tableName]: data.options }));
         })
     );
@@ -619,7 +620,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     try {
       setBusy(true);
       setError("");
-      await api(accessToken, `/api/records/${selectedTable.name}`, {
+      await api(`/api/records/${selectedTable.name}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(row)
@@ -640,7 +641,6 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     }
 
     const data = await api<RecordsResponse>(
-      accessToken,
       `/api/records/${selectedTable.name}?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}&search=${encodeURIComponent(
         appliedSearch
       )}`
@@ -673,7 +673,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     try {
       setExporting(true);
       setError("");
-      const rows = await fetchRecordsForExport(accessToken, selectedTable.name, appliedSearch);
+      const rows = await fetchRecordsForExport(selectedTable.name, appliedSearch);
       const exportColumns = selectedTable.columns.filter((column) => !column.hidden);
       const worksheetRows = rows.map((row) =>
         Object.fromEntries(
@@ -709,7 +709,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
     try {
       setBusy(true);
       setError("");
-      const response = await api<ImportResponse>(accessToken, `/api/import/${selectedTable.name}`, {
+      const response = await api<ImportResponse>(`/api/import/${selectedTable.name}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: importState.rows })
@@ -785,16 +785,8 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
           <p className="eyebrow">Supabase Admin</p>
           <h1>Covenants Control Room</h1>
           <p className="sidebar-copy">
-            Clean internal tooling for operating your Supabase data without exposing system keys.
+            Open internal tooling for operating the Supabase-backed business tables.
           </p>
-          <div className="session-card">
-            <strong>{currentUser.fullName || currentUser.email || "Authorized user"}</strong>
-            <span>{currentUser.email || "No email available"}</span>
-            <span className="session-role">Role: {currentUser.role}</span>
-            <button className="ghost-button" onClick={() => void onSignOut()} type="button">
-              Sign out
-            </button>
-          </div>
         </div>
 
         <nav className="table-list">
@@ -901,6 +893,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
             </button>
             <button
               className="ghost-button"
+              disabled={selectedTable.readOnly}
               onClick={() =>
                 setImportState({
                   fileName: "",
@@ -914,7 +907,7 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
             >
               Import Excel
             </button>
-            <button className="primary-button" onClick={openCreateEditor} type="button">
+            <button className="primary-button" disabled={selectedTable.readOnly} onClick={openCreateEditor} type="button">
               Add Row
             </button>
           </div>
@@ -958,16 +951,24 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                       ))}
                       <td>
                         <div className="row-actions">
-                          <button onClick={() => openEditEditor(row)} type="button">
-                            Edit
-                          </button>
-                          <button
-                            className="danger-link"
-                            onClick={() => void handleDeleteRecord(row)}
-                            type="button"
-                          >
-                            Delete
-                          </button>
+                          {selectedTable.readOnly ? (
+                            <button onClick={() => openEditEditor(row)} type="button">
+                              View
+                            </button>
+                          ) : (
+                            <>
+                              <button onClick={() => openEditEditor(row)} type="button">
+                                Edit
+                              </button>
+                              <button
+                                className="danger-link"
+                                onClick={() => void handleDeleteRecord(row)}
+                                type="button"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -997,10 +998,12 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
           <section className="dialog">
             <div className="dialog-head">
               <div>
-                <p className="eyebrow">{editor.mode === "create" ? "Create" : "Edit"}</p>
+                <p className="eyebrow">{selectedTable.readOnly ? "View" : editor.mode === "create" ? "Create" : "Edit"}</p>
                 <h3>{selectedTable.label} Row</h3>
                 <p className="dialog-copy">
-                  System-managed fields like generated IDs and timestamps stay hidden automatically.
+                  {selectedTable.readOnly
+                    ? "This audit table is read-only."
+                    : "System-managed fields like generated IDs and timestamps stay hidden automatically."}
                 </p>
               </div>
               <button className="close-button" onClick={closePanels} type="button">
@@ -1013,14 +1016,16 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 <button className="ghost-button" onClick={closePanels} type="button">
                   Close
                 </button>
-                <button className="primary-button" disabled={busy} type="submit">
-                  {busy ? "Saving…" : editor.mode === "create" ? "Create Row" : "Save Changes"}
-                </button>
+                {selectedTable.readOnly ? null : (
+                  <button className="primary-button" disabled={busy} type="submit">
+                    {busy ? "Saving…" : editor.mode === "create" ? "Create Row" : "Save Changes"}
+                  </button>
+                )}
               </div>
 
               <div className="form-grid">
               {editableColumns.map((column) => {
-                const disabled = editor.mode === "edit" && column.isPrimaryKey;
+                const disabled = selectedTable.readOnly || (editor.mode === "edit" && column.isPrimaryKey);
                 const foreignOptions = column.foreignKey
                   ? lookups[column.foreignKey.referencesTable] ?? []
                   : [];
@@ -1553,26 +1558,6 @@ export default function AdminConsole({ accessToken, currentUser, onSignOut }: Ad
                 </div>
               ) : null}
 
-              {selectedTable.specialHandler === "users" ? (
-                <label className="field">
-                  <span>Password</span>
-                  <input
-                    placeholder={
-                      editor.mode === "create"
-                        ? "Optional. Leave blank for an auto-generated password."
-                        : "Optional. Set to reset the user password."
-                    }
-                    type="password"
-                    value={formState.password ?? ""}
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        password: event.target.value
-                      }))
-                    }
-                  />
-                </label>
-              ) : null}
             </form>
           </section>
         </div>
@@ -1906,7 +1891,9 @@ function createFormFromColumns(columns: ColumnMeta[], row: RowRecord): FormState
 
 function createFormFromRow(table: TableMeta, row: RowRecord): FormState {
   return createFormFromColumns(
-    table.columns.filter((column) => !column.readOnly && !column.hidden && !column.autoGenerated),
+    table.columns.filter((column) =>
+      table.readOnly ? !column.hidden : !column.readOnly && !column.hidden && !column.autoGenerated
+    ),
     row
   );
 }
@@ -1948,10 +1935,6 @@ function buildPayload(table: TableMeta, formState: FormState, editor: EditorStat
     }
 
     payload[column.name] = value;
-  }
-
-  if (table.specialHandler === "users" && formState.password?.trim()) {
-    payload.password = formState.password.trim();
   }
 
   return payload;
@@ -2073,7 +2056,7 @@ function createRowKey(table: TableMeta, row: RowRecord, index: number) {
   return key || `${table.name}-${index}`;
 }
 
-async function fetchRecordsForExport(accessToken: string, tableName: string, search: string): Promise<RowRecord[]> {
+async function fetchRecordsForExport(tableName: string, search: string): Promise<RowRecord[]> {
   const rows: RowRecord[] = [];
   const limit = 500;
   let offset = 0;
@@ -2081,7 +2064,6 @@ async function fetchRecordsForExport(accessToken: string, tableName: string, sea
 
   do {
     const data = await api<RecordsResponse>(
-      accessToken,
       `/api/records/${tableName}?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}`
     );
     rows.push(...data.records);
@@ -2097,9 +2079,8 @@ function createExportFilename(tableName: string) {
   return `${tableName}-${stamp}.xlsx`;
 }
 
-async function api<T>(accessToken: string, url: string, init?: RequestInit): Promise<T> {
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${accessToken}`);
 
   const response = await fetch(url, {
     ...init,

@@ -13,9 +13,4 @@ if (!serviceRoleKey) {
   throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY in environment.");
 }
 
-export const supabase = createClient(supabaseUrl, serviceRoleKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
-});
+export const supabase = createClient(supabaseUrl, serviceRoleKey);

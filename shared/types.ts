@@ -34,13 +34,13 @@ export interface TableMeta {
   name: string;
   label: string;
   description?: string;
+  readOnly?: boolean;
   primaryKeys: string[];
   importMatchers?: string[][];
   displayColumn: string;
   searchableColumns: string[];
   listColumns: string[];
   columns: ColumnMeta[];
-  specialHandler?: "users";
 }
 
 export interface SchemaResponse {
@@ -99,15 +99,4 @@ export interface FacilityRelationsUpsertRequest {
     awardedAt?: string | null;
     expiresAt?: string | null;
   }>;
-}
-
-export interface AuthorizedUser {
-  id: string;
-  email: string | null;
-  fullName: string | null;
-  role: string;
-}
-
-export interface AuthStatusResponse {
-  user: AuthorizedUser;
 }
