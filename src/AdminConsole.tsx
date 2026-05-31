@@ -433,6 +433,15 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   }, [selectedTable]);
   const { autoManagedFields, connectedTableCount, ignoredImportHeaders, importMatchers, importableColumns } =
     selectedTableDetails;
+  const tableNavigationItems = useMemo(
+    () =>
+      tables.map((table) => ({
+        editableFieldCount: table.columns.filter((column) => !column.hidden && !column.readOnly).length,
+        label: table.label,
+        name: table.name
+      })),
+    [tables]
+  );
   const importHeaders = useMemo(
     () => ({
       optional: importableColumns
@@ -970,7 +979,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
         </div>
 
         <nav className="table-list">
-          {tables.map((table) => (
+          {tableNavigationItems.map((table) => (
             <button
               key={table.name}
               className={table.name === selectedTable.name ? "table-link active" : "table-link"}
@@ -988,44 +997,78 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
               type="button"
             >
               <span>{table.label}</span>
-              <strong>
-                {table.columns.filter((column) => !column.hidden && !column.readOnly).length} editable
-                fields
-              </strong>
+              <strong>{table.editableFieldCount} editable fields</strong>
             </button>
           ))}
         </nav>
       </aside>
 
       <main className="workspace">
-        <section className="hero">
-          <div>
-            <p className="eyebrow">Table</p>
-            <h2>{selectedTable.label}</h2>
-            <p className="hero-copy">
-              {selectedTable.description ??
-                `Manage ${selectedTable.label.toLowerCase()} with safe forms, bulk import, and auto-managed system fields.`}
-            </p>
-            <div className="hero-tags">
-              <span className="tag">Generated IDs hidden</span>
-              <span className="tag">Excel import ready</span>
-              <span className="tag">Supabase-backed</span>
+        <section className="workspace-header">
+          <div className="table-summary">
+            <div className="table-title-block">
+              <p className="eyebrow">Table</p>
+              <h2>{selectedTable.label}</h2>
+              <p className="hero-copy">
+                {selectedTable.description ??
+                  `Manage ${selectedTable.label.toLowerCase()} with safe forms, bulk import, and auto-managed system fields.`}
+              </p>
+            </div>
+
+            <div className="hero-stats" aria-label="Table stats">
+              <div className="stat-card">
+                <span>Total Rows</span>
+                <strong>{total}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Editable</span>
+                <strong>{editableFieldCount}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Connected</span>
+                <strong>{connectedTableCount}</strong>
+              </div>
             </div>
           </div>
 
-          <div className="hero-stats">
-            <div className="stat-card">
-              <span>Total Rows</span>
-              <strong>{total}</strong>
-            </div>
-            <div className="stat-card">
-              <span>Editable Fields</span>
-              <strong>{editableFieldCount}</strong>
-            </div>
-            <div className="stat-card">
-              <span>Connected Tables</span>
-              <strong>{connectedTableCount}</strong>
-            </div>
+          <div className="header-actions">
+            <button
+              className="ghost-button button-with-spinner"
+              disabled={loadingRecords || refreshing}
+              onClick={() => void handleRefreshClick()}
+              type="button"
+            >
+              {refreshing ? <span aria-hidden="true" className="spin" /> : null}
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              className="ghost-button button-with-spinner"
+              disabled={loadingRecords || exporting}
+              onClick={() => void handleExportClick()}
+              type="button"
+            >
+              {exporting ? <span aria-hidden="true" className="spin" /> : null}
+              {exporting ? "Exporting…" : "Export"}
+            </button>
+            <button
+              className="ghost-button"
+              disabled={selectedTable.readOnly}
+              onClick={() =>
+                setImportState({
+                  fileName: "",
+                  sheetNames: [],
+                  selectedSheetName: "",
+                  rowsBySheet: {},
+                  rows: []
+                })
+              }
+              type="button"
+            >
+              Import
+            </button>
+            <button className="primary-button" disabled={selectedTable.readOnly} onClick={openCreateEditor} type="button">
+              Add Row
+            </button>
           </div>
         </section>
 
@@ -1033,7 +1076,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
           <div className="controls-copy">
             <form className="search-form" onSubmit={handleSearchSubmit}>
               <label className="search">
-              <span>Search rows</span>
+                <span>Search rows</span>
                 <div className="search-input-group">
                   <input
                     value={searchInput}
@@ -1051,57 +1094,19 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
               Auto-generated fields stay hidden. Imports ignore them even if they appear in the sheet.
             </p>
           </div>
-
-          <div className="actions">
-            <button
-              className="ghost-button button-with-spinner"
-              disabled={loadingRecords || refreshing}
-              onClick={() => void handleRefreshClick()}
-              type="button"
-            >
-              {refreshing ? <span aria-hidden="true" className="spin" /> : null}
-              {refreshing ? "Refreshing…" : "Refresh"}
-            </button>
-            <button
-              className="ghost-button button-with-spinner"
-              disabled={loadingRecords || exporting}
-              onClick={() => void handleExportClick()}
-              type="button"
-            >
-              {exporting ? <span aria-hidden="true" className="spin" /> : null}
-              {exporting ? "Exporting…" : "Export Excel"}
-            </button>
-            <button
-              className="ghost-button"
-              disabled={selectedTable.readOnly}
-              onClick={() =>
-                setImportState({
-                  fileName: "",
-                  sheetNames: [],
-                  selectedSheetName: "",
-                  rowsBySheet: {},
-                  rows: []
-                })
-              }
-              type="button"
-            >
-              Import Excel
-            </button>
-            <button className="primary-button" disabled={selectedTable.readOnly} onClick={openCreateEditor} type="button">
-              Add Row
-            </button>
-          </div>
         </section>
 
         {error ? <p className="banner error">{error}</p> : null}
         {notice ? <p className="banner success">{notice}</p> : null}
 
-        <section className="panel table-panel">
+        <section className="panel table-panel" aria-busy={loadingRecords}>
           <div className="table-meta">
             <span>
               Page {page + 1} of {pageCount}
             </span>
-            <span>{loadingRecords ? "Loading rows…" : `${records.length} rows loaded`}</span>
+            <span className={loadingRecords ? "table-loading-status active" : "table-loading-status"}>
+              {loadingRecords ? "Loading rows…" : `${records.length} rows loaded`}
+            </span>
           </div>
 
           <div className="table-scroller">
@@ -1109,9 +1114,9 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
               <thead>
                 <tr>
                   {visibleColumns.map((column) => (
-                    <th key={column.name}>{column.label}</th>
+                    <th key={column.name} scope="col">{column.label}</th>
                   ))}
-                  <th>Actions</th>
+                  <th className="actions-column" scope="col">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1129,7 +1134,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                           {formatColumnValue(column, row[column.name], lookups)}
                         </td>
                       ))}
-                      <td>
+                      <td className="actions-cell">
                         <div className="row-actions">
                           {selectedTable.readOnly ? (
                             <button onClick={() => openEditEditor(row)} type="button">
@@ -1192,26 +1197,15 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             </div>
 
             <form className="record-form" onSubmit={(event) => void handleSaveRecord(event)}>
-              <div className="dialog-actions import-top-actions">
-                <button className="ghost-button" onClick={closePanels} type="button">
-                  Close
-                </button>
-                {selectedTable.readOnly ? null : (
-                  <button className="primary-button" disabled={busy} type="submit">
-                    {busy ? "Saving…" : editor.mode === "create" ? "Create Row" : "Save Changes"}
-                  </button>
-                )}
-              </div>
-
               <div className="form-grid">
-              {editableColumns.map((column) => {
-                const disabled = selectedTable.readOnly || (editor.mode === "edit" && column.isPrimaryKey);
-                const foreignOptions = column.foreignKey
-                  ? lookups[column.foreignKey.referencesTable] ?? []
-                  : [];
+                {editableColumns.map((column) => {
+                  const disabled = selectedTable.readOnly || (editor.mode === "edit" && column.isPrimaryKey);
+                  const foreignOptions = column.foreignKey
+                    ? lookups[column.foreignKey.referencesTable] ?? []
+                    : [];
 
-                return (
-                  <label className="field" key={column.name}>
+                  return (
+                    <label className="field" key={column.name}>
                       <span>
                         {column.label}
                         {column.nullable ? " optional" : ""}
@@ -1243,9 +1237,9 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                         }))
                       )
                     )}
-                  </label>
-                );
-              })}
+                    </label>
+                  );
+                })}
               </div>
 
               {isFacilityEditor ? (
@@ -1276,6 +1270,16 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                 </div>
               ) : null}
 
+              <div className="dialog-actions dialog-footer">
+                <button className="ghost-button" onClick={closePanels} type="button">
+                  Close
+                </button>
+                {selectedTable.readOnly ? null : (
+                  <button className="primary-button" disabled={busy} type="submit">
+                    {busy ? "Saving…" : editor.mode === "create" ? "Create Row" : "Save Changes"}
+                  </button>
+                )}
+              </div>
             </form>
           </section>
         </div>
@@ -1293,20 +1297,6 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                   columns line up, blank cells keep existing values, and generated IDs and timestamps are ignored.
                 </p>
               </div>
-            </div>
-
-            <div className="dialog-actions import-top-actions">
-              <button className="ghost-button" onClick={closePanels} type="button">
-                Close
-              </button>
-              <button
-                className="primary-button"
-                disabled={busy || importState.rows.length === 0 || Boolean(importMismatchMessage)}
-                onClick={() => void handleImportSubmit()}
-                type="button"
-              >
-                {busy ? "Importing…" : "Import Rows"}
-              </button>
             </div>
 
             <label className="upload-zone">
@@ -1327,7 +1317,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             </div>
 
             {importState.sheetNames.length > 1 ? (
-              <label className="field" style={{ marginBottom: 16 }}>
+              <label className="field import-sheet-field">
                 <span>Choose worksheet</span>
                 <select
                   value={importState.selectedSheetName}
@@ -1344,15 +1334,15 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
 
             <div className="auto-managed-note">
               <strong>Excel headers (exact column names)</strong>
-              <p className="helper-note" style={{ marginTop: 8 }}>
+              <p className="helper-note import-helper">
                 Your spreadsheet column headers must match these names exactly.
               </p>
-              <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+              <div className="import-header-grid">
                 <div>
                   <strong>Required:</strong>{" "}
                   {requiredImportHeaders.length > 0
                     ? requiredImportHeaders.map((name) => (
-                        <code key={`req-${name}`} style={{ marginRight: 8 }}>
+                        <code className="import-code" key={`req-${name}`}>
                           {name}
                         </code>
                       ))
@@ -1362,7 +1352,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                   <strong>Optional:</strong>{" "}
                   {optionalImportHeaders.length > 0
                     ? optionalImportHeaders.map((name) => (
-                        <code key={`opt-${name}`} style={{ marginRight: 8 }}>
+                        <code className="import-code" key={`opt-${name}`}>
                           {name}
                         </code>
                       ))
@@ -1372,7 +1362,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                   <strong>Matches Existing Rows By:</strong>{" "}
                   {importMatcherSummary.length > 0
                     ? importMatcherSummary.map((name) => (
-                        <code key={`match-${name}`} style={{ marginRight: 8 }}>
+                        <code className="import-code" key={`match-${name}`}>
                           {name}
                         </code>
                       ))
@@ -1382,7 +1372,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                   <strong>Ignored:</strong>{" "}
                   {ignoredImportHeaders.length > 0
                     ? ignoredImportHeaders.map((name) => (
-                        <code key={`ign-${name}`} style={{ marginRight: 8 }}>
+                        <code className="import-code" key={`ign-${name}`}>
                           {name}
                         </code>
                       ))
@@ -1392,11 +1382,11 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             </div>
 
             {importMismatchMessage ? (
-              <div className="helper-note" role="alert" style={{ color: "#f97316", marginTop: 12 }}>
+              <div className="helper-note import-warning" role="alert">
                 {importMismatchMessage}
               </div>
             ) : activeImportMatcher ? (
-              <div className="helper-note" style={{ marginTop: 12 }}>
+              <div className="helper-note import-match-note">
                 This file will match existing rows using <code>{activeImportMatcher.join(" + ")}</code>. Non-empty
                 cells update matching rows, while blank cells keep the current value.
               </div>
@@ -1411,7 +1401,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                       {previewColumns.map((column) => (
                         <th key={column}>{getImportHeaderName(selectedTable.columns.find((entry) => entry.name === column) ?? column)}</th>
                       ))}
-                      <th>Actions</th>
+                      <th className="actions-column" scope="col">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1421,7 +1411,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                         {previewColumns.map((column) => (
                           <td key={column}>{formatCellValue(row[column])}</td>
                         ))}
-                        <td>
+                        <td className="actions-cell">
                           <div className="row-actions">
                             <button onClick={() => openImportEditor(row, rowIndex)} type="button">
                               Edit
@@ -1442,6 +1432,19 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
               </div>
             ) : null}
 
+            <div className="dialog-actions dialog-footer">
+              <button className="ghost-button" onClick={closePanels} type="button">
+                Close
+              </button>
+              <button
+                className="primary-button"
+                disabled={busy || importState.rows.length === 0 || Boolean(importMismatchMessage)}
+                onClick={() => void handleImportSubmit()}
+                type="button"
+              >
+                {busy ? "Importing…" : "Import Rows"}
+              </button>
+            </div>
           </section>
         </div>
       ) : null}
@@ -1449,7 +1452,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       {importEditor && selectedTable ? (
         <div className="overlay">
           <section className="dialog">
-            <div className="dialog-head" style={{ marginBottom: 12 }}>
+            <div className="dialog-head">
               <div>
                 <p className="eyebrow">Edit Imported Row</p>
                 <h3>
@@ -1518,7 +1521,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                 })}
               </div>
 
-              <div className="dialog-actions">
+              <div className="dialog-actions dialog-footer">
                 <button className="ghost-button" onClick={closeImportEditor} type="button">
                   Cancel
                 </button>
@@ -1850,7 +1853,13 @@ function ChemistryRelations({
       {rows.map((row, index) => (
         <div className="relation-chip" key={`${row.chemistryId}-${index}`}>
           <span>{getLabel(row.chemistryId)}</span>
-          <button disabled={disabled} type="button" onClick={() => onRemove(index)}>
+          <button
+            aria-label={`Remove ${getLabel(row.chemistryId)}`}
+            className="danger-pill"
+            disabled={disabled}
+            type="button"
+            onClick={() => onRemove(index)}
+          >
             Remove
           </button>
         </div>
@@ -1906,7 +1915,13 @@ function ProductRelations({
                 />
                 <span>Primary</span>
               </label>
-              <button className="danger-link" disabled={disabled} type="button" onClick={() => onRemove(index)}>
+              <button
+                aria-label={`Remove ${casNumber}`}
+                className="danger-pill"
+                disabled={disabled}
+                type="button"
+                onClick={() => onRemove(index)}
+              >
                 Remove
               </button>
             </div>
@@ -1944,7 +1959,13 @@ function AccreditationRelations({
         <div className="relation-row accreditation-relation-row" key={`${row.accreditationId}-${index}`}>
           <div className="relation-row-title">
             <strong>{getLabel(row.accreditationId)}</strong>
-            <button className="danger-link" disabled={disabled} type="button" onClick={() => onRemove(index)}>
+            <button
+              aria-label={`Remove ${getLabel(row.accreditationId)}`}
+              className="danger-pill"
+              disabled={disabled}
+              type="button"
+              onClick={() => onRemove(index)}
+            >
               Remove
             </button>
           </div>
