@@ -822,18 +822,28 @@ tbody tr:hover .actions-cell {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fbfcfc;
+  background: var(--paper);
 }
 
 .relation-search-input {
   margin: 0;
 }
 
+.relation-search-input > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
 .relation-results {
   display: grid;
-  gap: 4px;
+  gap: 0;
   max-height: 190px;
   overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
 }
 
 .relation-result {
@@ -843,12 +853,17 @@ tbody tr:hover .actions-cell {
   gap: 12px;
   width: 100%;
   min-height: 34px;
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--paper);
+  padding: 7px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
   text-align: left;
+}
+
+.relation-result:last-child {
+  border-bottom: 0;
 }
 
 .relation-result span {
@@ -887,7 +902,6 @@ tbody tr:hover .actions-cell {
 }
 
 .relation-result:hover:not(:disabled) {
-  border-color: rgba(var(--accent-rgb), 0.28);
   background: var(--accent-surface);
 }
 
@@ -898,6 +912,7 @@ tbody tr:hover .actions-cell {
 
 .relation-result.muted {
   cursor: default;
+  background: #fbfcfc;
 }
 
 .quick-create {

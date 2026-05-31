@@ -1617,6 +1617,29 @@ function FacilityRelationsEditor({
       </div>
 
       <div className="relation-tab-panel" role="tabpanel">
+        <RelationSearchBox
+          disabled={disabled}
+          label={getRelationSingularLabel(activeTab)}
+          loading={optionsLoading[activeTab]}
+          options={getAvailableOptions(activeTab, selectedIdsByKey[activeTab])}
+          quickCreating={quickCreating === activeTab}
+          search={search[activeTab]}
+          type={activeTab}
+          onAdd={(id) => {
+            if (activeTab === "chemistries") {
+              onAddChemistry(id);
+            }
+            if (activeTab === "products") {
+              onAddProduct(id);
+            }
+            if (activeTab === "accreditations") {
+              onAddAccreditation(id);
+            }
+          }}
+          onQuickCreate={(values) => onQuickCreate(activeTab, values)}
+          onSearchChange={(value) => onSearchChange(activeTab, value)}
+        />
+
         {activeTab === "chemistries" ? (
           <ChemistryRelations
             disabled={disabled}
@@ -1675,29 +1698,6 @@ function FacilityRelationsEditor({
             }
           />
         ) : null}
-
-        <RelationSearchBox
-          disabled={disabled}
-          label={getRelationSingularLabel(activeTab)}
-          loading={optionsLoading[activeTab]}
-          options={getAvailableOptions(activeTab, selectedIdsByKey[activeTab])}
-          quickCreating={quickCreating === activeTab}
-          search={search[activeTab]}
-          type={activeTab}
-          onAdd={(id) => {
-            if (activeTab === "chemistries") {
-              onAddChemistry(id);
-            }
-            if (activeTab === "products") {
-              onAddProduct(id);
-            }
-            if (activeTab === "accreditations") {
-              onAddAccreditation(id);
-            }
-          }}
-          onQuickCreate={(values) => onQuickCreate(activeTab, values)}
-          onSearchChange={(value) => onSearchChange(activeTab, value)}
-        />
       </div>
     </section>
   );
@@ -1780,29 +1780,31 @@ function RelationSearchBox({
         />
       </label>
 
-      <div className="relation-results" role="listbox" aria-label={`${label} matches`}>
-        {canSearch && loading ? <div className="relation-result muted">Searching...</div> : null}
-        {canSearch && !loading && visibleOptions.length > 0
-          ? visibleOptions.map((option) => (
-              <button
-                key={option.value}
-                className="relation-result"
-                disabled={disabled || quickCreating}
-                type="button"
-                onClick={() => onAdd(option.value)}
-              >
-                <span>
-                  <strong className="relation-result-main">{option.label}</strong>
-                  {isProduct ? <small>{option.meta?.productId ?? option.value}</small> : null}
-                </span>
-                <strong>Add</strong>
-              </button>
-            ))
-          : null}
-        {canSearch && !loading && visibleOptions.length === 0 ? (
-          <div className="relation-result muted">No existing match.</div>
-        ) : null}
-      </div>
+      {canSearch ? (
+        <div className="relation-results" role="listbox" aria-label={`${label} matches`}>
+          {loading ? <div className="relation-result muted">Searching...</div> : null}
+          {!loading && visibleOptions.length > 0
+            ? visibleOptions.map((option) => (
+                <button
+                  key={option.value}
+                  className="relation-result"
+                  disabled={disabled || quickCreating}
+                  type="button"
+                  onClick={() => onAdd(option.value)}
+                >
+                  <span>
+                    <strong className="relation-result-main">{option.label}</strong>
+                    {isProduct ? <small>{option.meta?.productId ?? option.value}</small> : null}
+                  </span>
+                  <strong>Add</strong>
+                </button>
+              ))
+            : null}
+          {!loading && visibleOptions.length === 0 ? (
+            <div className="relation-result muted">No existing match.</div>
+          ) : null}
+        </div>
+      ) : null}
 
       {showQuickCreate ? (
         <div className="quick-create">
