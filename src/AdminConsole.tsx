@@ -1617,29 +1617,6 @@ function FacilityRelationsEditor({
       </div>
 
       <div className="relation-tab-panel" role="tabpanel">
-        <RelationSearchBox
-          disabled={disabled}
-          label={getRelationSingularLabel(activeTab)}
-          loading={optionsLoading[activeTab]}
-          options={getAvailableOptions(activeTab, selectedIdsByKey[activeTab])}
-          quickCreating={quickCreating === activeTab}
-          search={search[activeTab]}
-          type={activeTab}
-          onAdd={(id) => {
-            if (activeTab === "chemistries") {
-              onAddChemistry(id);
-            }
-            if (activeTab === "products") {
-              onAddProduct(id);
-            }
-            if (activeTab === "accreditations") {
-              onAddAccreditation(id);
-            }
-          }}
-          onQuickCreate={(values) => onQuickCreate(activeTab, values)}
-          onSearchChange={(value) => onSearchChange(activeTab, value)}
-        />
-
         {activeTab === "chemistries" ? (
           <ChemistryRelations
             disabled={disabled}
@@ -1698,6 +1675,29 @@ function FacilityRelationsEditor({
             }
           />
         ) : null}
+
+        <RelationSearchBox
+          disabled={disabled}
+          label={getRelationSingularLabel(activeTab)}
+          loading={optionsLoading[activeTab]}
+          options={getAvailableOptions(activeTab, selectedIdsByKey[activeTab])}
+          quickCreating={quickCreating === activeTab}
+          search={search[activeTab]}
+          type={activeTab}
+          onAdd={(id) => {
+            if (activeTab === "chemistries") {
+              onAddChemistry(id);
+            }
+            if (activeTab === "products") {
+              onAddProduct(id);
+            }
+            if (activeTab === "accreditations") {
+              onAddAccreditation(id);
+            }
+          }}
+          onQuickCreate={(values) => onQuickCreate(activeTab, values)}
+          onSearchChange={(value) => onSearchChange(activeTab, value)}
+        />
       </div>
     </section>
   );
@@ -1730,14 +1730,20 @@ function RelationSearchBox({
 }: RelationSearchBoxProps) {
   const [productName, setProductName] = useState("");
   const trimmedSearch = search.trim();
-  const showQuickCreate = Boolean(trimmedSearch);
+  const canSearch = trimmedSearch.length >= 2;
+  const visibleOptions = canSearch ? options.slice(0, 5) : [];
+  const showQuickCreate = canSearch;
   const isProduct = type === "products";
   const inputLabel = isProduct ? "Search or create by CAS number" : `Search or create ${label.toLowerCase()}`;
   const placeholder = isProduct ? "Type a CAS number" : `Type a ${label.toLowerCase()} name`;
 
   function addFirstOption() {
-    if (options[0]) {
-      onAdd(options[0].value);
+    if (!canSearch) {
+      return;
+    }
+
+    if (visibleOptions[0]) {
+      onAdd(visibleOptions[0].value);
       return;
     }
 
@@ -1775,9 +1781,9 @@ function RelationSearchBox({
       </label>
 
       <div className="relation-results" role="listbox" aria-label={`${label} matches`}>
-        {loading ? <div className="relation-result muted">Searching...</div> : null}
-        {!loading && options.length > 0
-          ? options.map((option) => (
+        {canSearch && loading ? <div className="relation-result muted">Searching...</div> : null}
+        {canSearch && !loading && visibleOptions.length > 0
+          ? visibleOptions.map((option) => (
               <button
                 key={option.value}
                 className="relation-result"
@@ -1793,7 +1799,7 @@ function RelationSearchBox({
               </button>
             ))
           : null}
-        {!loading && options.length === 0 && trimmedSearch ? (
+        {canSearch && !loading && visibleOptions.length === 0 ? (
           <div className="relation-result muted">No existing match.</div>
         ) : null}
       </div>
