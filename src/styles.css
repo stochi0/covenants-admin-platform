@@ -839,7 +839,7 @@ tbody tr:hover .actions-cell {
 .relation-results {
   display: grid;
   gap: 0;
-  max-height: 190px;
+  max-height: 180px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -852,8 +852,8 @@ tbody tr:hover .actions-cell {
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  min-height: 34px;
-  padding: 7px 8px;
+  min-height: 32px;
+  padding: 5px 8px;
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
@@ -873,18 +873,20 @@ tbody tr:hover .actions-cell {
 
 .relation-result span:first-child {
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .relation-result-main {
   color: var(--text) !important;
-  font-size: 0.9rem !important;
-  font-weight: 500;
+  font-size: 0.88rem !important;
+  font-weight: 600;
+  line-height: 1.08;
 }
 
 .relation-result small {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
+  line-height: 1.08;
 }
 
 .relation-result strong {
@@ -899,6 +901,40 @@ tbody tr:hover .actions-cell {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--paper);
+}
+
+.product-search-result {
+  align-items: center;
+}
+
+.product-search-result-meta {
+  display: flex !important;
+  align-items: center;
+  gap: 6px !important;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.product-search-result-meta small,
+.product-search-result-meta .relation-result-main {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 25px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--accent-strong) !important;
+  font-size: 0.82rem !important;
+  font-weight: 500;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.product-search-result-meta .relation-result-main {
+  background: var(--paper);
+  color: var(--muted) !important;
 }
 
 .relation-result:hover:not(:disabled) {

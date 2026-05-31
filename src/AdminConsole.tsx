@@ -1787,15 +1787,21 @@ function RelationSearchBox({
             ? visibleOptions.map((option) => (
                 <button
                   key={option.value}
-                  className="relation-result"
+                  className={isProduct ? "relation-result product-search-result" : "relation-result"}
                   disabled={disabled || quickCreating}
                   type="button"
                   onClick={() => onAdd(option.value)}
                 >
-                  <span>
-                    <strong className="relation-result-main">{option.label}</strong>
-                    {isProduct ? <small>{option.meta?.productId ?? option.value}</small> : null}
-                  </span>
+                  {isProduct ? (
+                    <span className="product-search-result-meta">
+                      <small>{option.meta?.productId ?? option.value}</small>
+                      <strong className="relation-result-main">{option.meta?.casNumber ?? option.label}</strong>
+                    </span>
+                  ) : (
+                    <span>
+                      <strong className="relation-result-main">{option.label}</strong>
+                    </span>
+                  )}
                   <strong>Add</strong>
                 </button>
               ))
