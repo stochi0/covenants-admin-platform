@@ -89,7 +89,12 @@ app.get("/api/options/:table", async (req, res) => {
   try {
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
     const limit = clampNumber(req.query.limit, 50, 1, 500);
-    const data = await getOptions(req.params.table, { search, limit });
+    const variant = typeof req.query.variant === "string" ? req.query.variant : undefined;
+    const ids =
+      typeof req.query.ids === "string"
+        ? req.query.ids.split(",").map((id) => id.trim()).filter(Boolean)
+        : undefined;
+    const data = await getOptions(req.params.table, { ids, search, limit, variant });
     res.json(data);
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });

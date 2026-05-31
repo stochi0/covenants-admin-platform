@@ -5,6 +5,7 @@ import type {
   FacilityRelationsResponse,
   FacilityRelationsUpsertRequest,
   ImportResponse,
+  OptionRecord,
   OptionsResponse,
   RecordsResponse,
   SchemaResponse,
@@ -147,6 +148,33 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
     return options.find((option) => option.value === id)?.label ?? id;
   }
 
+  function getRelationOption(key: RelationSearchKey, id: string) {
+    const options = [...(lookups[RELATION_TABLE_BY_KEY[key]] ?? []), ...(facilityRelationOptions[key] ?? [])];
+    return options.find((option) => option.value === id) ?? null;
+  }
+
+  async function loadRelationOptionsByIds(key: RelationSearchKey, ids: string[]) {
+    const missingIds = [...new Set(ids.filter((id) => id && !getRelationOption(key, id)))];
+    if (missingIds.length === 0) {
+      return;
+    }
+
+    const tableName = RELATION_TABLE_BY_KEY[key];
+    const params = new URLSearchParams({
+      ids: missingIds.join(","),
+      limit: String(missingIds.length)
+    });
+    if (key === "products") {
+      params.set("variant", "facility_relation");
+    }
+
+    const data = await api<OptionsResponse>(`/api/options/${tableName}?${params.toString()}`);
+    setLookups((current) => ({
+      ...current,
+      [tableName]: mergeOptions(current[tableName] ?? [], data.options)
+    }));
+  }
+
   async function loadRelationOptions(key: RelationSearchKey, search = "", signal?: AbortSignal) {
     setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: true }));
 
@@ -154,6 +182,9 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
     const params = new URLSearchParams({
       limit: String(RELATION_OPTION_LIMIT)
     });
+    if (key === "products") {
+      params.set("variant", "facility_relation");
+    }
     const query = search.trim();
     if (query) {
       params.set("search", query);
@@ -174,7 +205,10 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
     return data.options;
   }
 
-  async function quickCreateRelationOption(key: RelationSearchKey, values: { name: string; casNumber?: string }) {
+  async function quickCreateRelationOption(
+    key: RelationSearchKey,
+    values: { name: string; casNumber?: string; productName?: string }
+  ) {
     const name = values.name.trim();
     if (!name) {
       return;
@@ -196,7 +230,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
         throw new Error(`Created ${RELATION_LABEL_BY_KEY[key].toLowerCase()} record did not return an id.`);
       }
 
-      await loadRelationOptions(key, name);
+      await loadRelationOptions(key, key === "products" ? values.casNumber ?? name : name);
       if (key === "chemistries") {
         addChemistryRelation(createdId);
       }
@@ -206,7 +240,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       if (key === "accreditations") {
         addAccreditationRelation(createdId);
       }
-      setNotice(`Created and linked ${name}.`);
+      setNotice(`Created and linked ${key === "products" ? values.casNumber ?? name : name}.`);
     } catch (apiError) {
       setError(getErrorMessage(apiError));
     } finally {
@@ -694,6 +728,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       await ensureFacilityRelationOptions();
 
       const data = await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`);
+      await hydrateFacilityRelationLabels(data);
       setFacilityRelations(data);
       setFacilityRelationsDraft({
         chemistries: data.chemistries.map((row) => ({
@@ -716,6 +751,23 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
     } finally {
       setFacilityRelationsLoading(false);
     }
+  }
+
+  async function hydrateFacilityRelationLabels(data: FacilityRelationsResponse) {
+    await Promise.all([
+      loadRelationOptionsByIds(
+        "chemistries",
+        data.chemistries.map((row) => row.chemistryId)
+      ),
+      loadRelationOptionsByIds(
+        "products",
+        data.products.map((row) => row.productId)
+      ),
+      loadRelationOptionsByIds(
+        "accreditations",
+        data.accreditations.map((row) => row.accreditationId)
+      )
+    ]);
   }
 
   async function ensureFacilityRelationOptions() {
@@ -1202,6 +1254,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                   busy={busy}
                   draft={facilityRelationsDraft ?? createEmptyFacilityRelationsDraft()}
                   getLabel={getRelationOptionLabel}
+                  getOption={getRelationOption}
                   loading={facilityRelationsLoading}
                   optionsLoading={facilityRelationOptionsLoading}
                   quickCreating={quickCreatingRelation}
@@ -1487,6 +1540,7 @@ interface FacilityRelationsEditorProps {
   draft: FacilityRelationsUpsertRequest;
   getAvailableOptions: (key: RelationSearchKey, selectedIds: string[]) => OptionsResponse["options"];
   getLabel: (key: RelationSearchKey, id: string) => string;
+  getOption: (key: RelationSearchKey, id: string) => OptionRecord | null;
   loading: boolean;
   optionsLoading: Record<RelationSearchKey, boolean>;
   quickCreating: RelationSearchKey | null;
@@ -1494,7 +1548,7 @@ interface FacilityRelationsEditorProps {
   onAddAccreditation: (id: string) => void;
   onAddChemistry: (id: string) => void;
   onAddProduct: (id: string) => void;
-  onQuickCreate: (key: RelationSearchKey, values: { name: string; casNumber?: string }) => void;
+  onQuickCreate: (key: RelationSearchKey, values: { name: string; casNumber?: string; productName?: string }) => void;
   onSearchChange: (key: RelationSearchKey, value: string) => void;
   onTabChange: (key: RelationSearchKey) => void;
   onUpdateDraft: (
@@ -1508,6 +1562,7 @@ function FacilityRelationsEditor({
   draft,
   getAvailableOptions,
   getLabel,
+  getOption,
   loading,
   optionsLoading,
   quickCreating,
@@ -1600,6 +1655,7 @@ function FacilityRelationsEditor({
           <ProductRelations
             disabled={disabled}
             rows={draft.products ?? []}
+            getOption={(id) => getOption("products", id)}
             getLabel={(id) => getLabel("products", id)}
             onPrimaryChange={(index, isPrimary) =>
               onUpdateDraft((current) => ({
@@ -1653,7 +1709,7 @@ interface RelationSearchBoxProps {
   search: string;
   type: RelationSearchKey;
   onAdd: (id: string) => void;
-  onQuickCreate: (values: { name: string; casNumber?: string }) => void;
+  onQuickCreate: (values: { name: string; casNumber?: string; productName?: string }) => void;
   onSearchChange: (value: string) => void;
 }
 
@@ -1669,9 +1725,12 @@ function RelationSearchBox({
   onQuickCreate,
   onSearchChange
 }: RelationSearchBoxProps) {
-  const [casNumber, setCasNumber] = useState("");
+  const [productName, setProductName] = useState("");
   const trimmedSearch = search.trim();
   const showQuickCreate = Boolean(trimmedSearch);
+  const isProduct = type === "products";
+  const inputLabel = isProduct ? "Search or create by CAS number" : `Search or create ${label.toLowerCase()}`;
+  const placeholder = isProduct ? "Type a CAS number" : `Type a ${label.toLowerCase()} name`;
 
   function addFirstOption() {
     if (options[0]) {
@@ -1680,20 +1739,24 @@ function RelationSearchBox({
     }
 
     if (trimmedSearch) {
-      onQuickCreate({ name: trimmedSearch, casNumber: casNumber.trim() || undefined });
-      setCasNumber("");
+      onQuickCreate({
+        name: isProduct ? productName.trim() || trimmedSearch : trimmedSearch,
+        casNumber: isProduct ? trimmedSearch : undefined,
+        productName: productName.trim() || undefined
+      });
+      setProductName("");
     }
   }
 
   return (
     <div className="relation-search">
       <label className="field relation-search-input">
-        <span>Search or create {label.toLowerCase()}</span>
+        <span>{inputLabel}</span>
         <input
           aria-label={`Search ${label}`}
           disabled={disabled || quickCreating}
           type="search"
-          placeholder={`Type a ${label.toLowerCase()} name`}
+          placeholder={placeholder}
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           onKeyDown={(event) => {
@@ -1719,7 +1782,10 @@ function RelationSearchBox({
                 type="button"
                 onClick={() => onAdd(option.value)}
               >
-                <span>{option.label}</span>
+                <span>
+                  <strong className="relation-result-main">{option.label}</strong>
+                  {isProduct ? <small>{option.meta?.productId ?? option.value}</small> : null}
+                </span>
                 <strong>Add</strong>
               </button>
             ))
@@ -1733,13 +1799,13 @@ function RelationSearchBox({
         <div className="quick-create">
           {type === "products" ? (
             <label className="field">
-              <span>CAS number optional</span>
+              <span>Product name optional</span>
               <input
                 disabled={disabled || quickCreating}
-                placeholder="CAS number"
+                placeholder="Product name"
                 type="text"
-                value={casNumber}
-                onChange={(event) => setCasNumber(event.target.value)}
+                value={productName}
+                onChange={(event) => setProductName(event.target.value)}
               />
             </label>
           ) : null}
@@ -1748,8 +1814,12 @@ function RelationSearchBox({
             disabled={disabled || quickCreating}
             type="button"
             onClick={() => {
-              onQuickCreate({ name: trimmedSearch, casNumber: casNumber.trim() || undefined });
-              setCasNumber("");
+              onQuickCreate({
+                name: isProduct ? productName.trim() || trimmedSearch : trimmedSearch,
+                casNumber: isProduct ? trimmedSearch : undefined,
+                productName: productName.trim() || undefined
+              });
+              setProductName("");
             }}
           >
             {quickCreating ? "Creating..." : `Create "${trimmedSearch}"`}
@@ -1792,12 +1862,14 @@ function ChemistryRelations({
 function ProductRelations({
   disabled,
   rows,
+  getOption,
   getLabel,
   onPrimaryChange,
   onRemove
 }: {
   disabled: boolean;
   rows: NonNullable<FacilityRelationsUpsertRequest["products"]>;
+  getOption: (id: string) => OptionsResponse["options"][number] | null;
   getLabel: (id: string) => string;
   onPrimaryChange: (index: number, isPrimary: boolean) => void;
   onRemove: (index: number) => void;
@@ -1808,23 +1880,39 @@ function ProductRelations({
 
   return (
     <div className="relation-row-list">
-      {rows.map((row, index) => (
-        <div className="relation-row product-relation-row" key={`${row.productId}-${index}`}>
-          <strong>{getLabel(row.productId)}</strong>
-          <label className="toggle-field">
-            <input
-              checked={row.isPrimary}
-              disabled={disabled}
-              type="checkbox"
-              onChange={(event) => onPrimaryChange(index, event.target.checked)}
-            />
-            <span>Primary</span>
-          </label>
-          <button className="danger-link" disabled={disabled} type="button" onClick={() => onRemove(index)}>
-            Remove
-          </button>
-        </div>
-      ))}
+      {rows.map((row, index) => {
+        const option = getOption(row.productId);
+        const casNumber = option?.meta?.casNumber ?? getLabel(row.productId);
+        const productId = option?.meta?.productId ?? row.productId;
+        const productName = option?.meta?.productName;
+
+        return (
+          <div className="relation-row product-relation-row" key={`${row.productId}-${index}`}>
+            <div className="product-relation-main">
+              <strong>{casNumber}</strong>
+              <div className="product-relation-meta">
+                <span>{productId}</span>
+                {productName ? <small>{productName}</small> : null}
+              </div>
+            </div>
+
+            <div className="product-relation-actions">
+              <label className={row.isPrimary ? "primary-toggle active" : "primary-toggle"}>
+                <input
+                  checked={row.isPrimary}
+                  disabled={disabled}
+                  type="checkbox"
+                  onChange={(event) => onPrimaryChange(index, event.target.checked)}
+                />
+                <span>Primary</span>
+              </label>
+              <button className="danger-link" disabled={disabled} type="button" onClick={() => onRemove(index)}>
+                Remove
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2197,7 +2285,7 @@ function buildQuickCreatePayload(key: RelationSearchKey, name: string, casNumber
 
   return {
     product_name: name,
-    cas_number: casNumber?.trim() || null
+    cas_number: casNumber?.trim() || name
   };
 }
 

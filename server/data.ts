@@ -305,13 +305,20 @@ async function prepareRecordForPersist(table: TableMeta, payload: RecordInput): 
 export async function getOptions(
   tableName: string,
   options: {
+    ids?: string[];
     search?: string;
     limit?: number;
+    variant?: string;
   } = {}
 ): Promise<OptionsResponse> {
   const table = getTableOrThrow(tableName);
   const primaryKey = table.primaryKeys[0];
   const displayColumn = table.displayColumn;
+  const ids = [...new Set((options.ids ?? []).filter(Boolean))];
+  if (table.name === "products" && options.variant === "facility_relation") {
+    return getProductFacilityRelationOptions(options.search, options.limit ?? 50, ids);
+  }
+
   const searchColumns = table.searchableColumns
     .map((columnName) => table.columns.find((column) => column.name === columnName))
     .filter((column): column is TableMeta["columns"][number] => Boolean(column))
@@ -320,8 +327,11 @@ export async function getOptions(
   const columns = [...new Set([primaryKey, displayColumn, ...searchColumns])];
 
   let query = supabase.from(table.name).select(columns.join(",")).limit(options.limit ?? 50);
+  if (ids.length > 0) {
+    query = query.in(primaryKey, ids);
+  }
   const search = options.search?.trim();
-  if (search && searchColumns.length > 0) {
+  if (ids.length === 0 && search && searchColumns.length > 0) {
     const escaped = escapeForIlike(search);
     query = query.or(searchColumns.map((columnName) => `${columnName}.ilike.%${escaped}%`).join(","));
   }
@@ -339,6 +349,52 @@ export async function getOptions(
       value: String(row[primaryKey]),
       label: createOptionLabel(row, primaryKey, displayColumn)
     }))
+  };
+}
+
+async function getProductFacilityRelationOptions(
+  search: string | undefined,
+  limit: number,
+  ids: string[] = []
+): Promise<OptionsResponse> {
+  let query = supabase
+    .from("products")
+    .select("id,cas_number,product_name")
+    .limit(limit)
+    .order("cas_number", { ascending: true, nullsFirst: false });
+  const trimmedSearch = search?.trim();
+
+  if (ids.length > 0) {
+    query = query.in("id", ids);
+  } else if (trimmedSearch) {
+    query = query.ilike("cas_number", `%${escapeForIlike(trimmedSearch)}%`);
+  } else {
+    query = query.not("cas_number", "is", null);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const optionRows = (data ?? []) as unknown as RecordInput[];
+
+  return {
+    options: optionRows.map((row) => {
+      const productId = String(row.id ?? "");
+      const casNumber = stringifyOptionMeta(row.cas_number);
+      const productName = stringifyOptionMeta(row.product_name);
+
+      return {
+        value: productId,
+        label: casNumber || productId,
+        meta: {
+          casNumber,
+          productId,
+          productName
+        }
+      };
+    })
   };
 }
 
@@ -1033,6 +1089,15 @@ function createOptionLabel(
 
   const fallback = String(row[primaryKey] ?? "");
   return fallback ? "Unnamed record" : "Unnamed record";
+}
+
+function stringifyOptionMeta(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const stringValue = String(value).trim();
+  return stringValue || null;
 }
 
 function escapeForIlike(value: string) {

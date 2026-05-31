@@ -62,8 +62,11 @@ export interface OptionsResponse {
   options: Array<{
     value: string;
     label: string;
+    meta?: Record<string, string | null>;
   }>;
 }
+
+export type OptionRecord = OptionsResponse["options"][number];
 
 export interface FacilityChemistryRelation {
   chemistryId: string;

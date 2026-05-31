@@ -675,6 +675,21 @@ th {
   overflow-wrap: anywhere;
 }
 
+.relation-result span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.relation-result-main {
+  color: var(--text) !important;
+  font-size: 1rem !important;
+}
+
+.relation-result small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .relation-result strong {
   color: var(--accent-strong);
   font-size: 0.82rem;
@@ -756,8 +771,51 @@ th {
 }
 
 .product-relation-row {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+}
+
+.product-relation-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.product-relation-main strong {
+  font-size: 1.02rem;
+}
+
+.product-relation-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.product-relation-meta span,
+.product-relation-meta small {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--accent-surface);
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.product-relation-meta small {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+}
+
+.product-relation-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .relation-row strong {
@@ -772,7 +830,8 @@ th {
   align-items: center;
 }
 
-.toggle-field {
+.toggle-field,
+.primary-toggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -780,9 +839,23 @@ th {
   white-space: nowrap;
 }
 
-.toggle-field input {
+.toggle-field input,
+.primary-toggle input {
   width: 16px;
   height: 16px;
+}
+
+.primary-toggle {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.primary-toggle.active {
+  border-color: rgba(var(--accent-rgb), 0.28);
+  background: var(--accent-surface);
+  color: var(--accent-strong);
 }
 
 .accreditation-fields {
@@ -867,6 +940,11 @@ th {
   .accreditation-fields,
   .product-relation-row {
     grid-template-columns: 1fr;
+  }
+
+  .product-relation-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .quick-create {
