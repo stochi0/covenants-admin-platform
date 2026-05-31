@@ -96,6 +96,41 @@ button:disabled {
   grid-template-columns: 320px 1fr;
 }
 
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(100%, 420px);
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.auth-panel h1 {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1.05;
+}
+
+.auth-panel p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.auth-actions {
+  margin-top: 24px;
+}
+
+.auth-action {
+  width: 100%;
+}
+
 .loading-screen {
   display: grid;
   place-items: center;
@@ -142,7 +177,8 @@ button:disabled {
 .table-meta,
 .import-summary span,
 .helper-note,
-.dialog-copy {
+.dialog-copy,
+.admin-session {
   color: var(--muted);
 }
 
@@ -150,6 +186,24 @@ button:disabled {
   display: grid;
   gap: 10px;
   margin-top: 32px;
+}
+
+.admin-session {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 0.86rem;
+}
+
+.admin-session button {
+  width: fit-content;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 .table-link {

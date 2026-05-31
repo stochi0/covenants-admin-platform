@@ -13,6 +13,7 @@ import {
   upsertFacilityRelations,
   updateRecord
 } from "./data.js";
+import { requireAdmin, type AuthenticatedAdminRequest } from "./auth.js";
 
 dotenv.config();
 
@@ -23,6 +24,12 @@ app.use(express.json({ limit: "10mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+app.use("/api", requireAdmin);
+
+app.get("/api/auth/me", (req: AuthenticatedAdminRequest, res) => {
+  res.json({ user: req.admin });
 });
 
 app.get("/api/schema", (_req, res) => {

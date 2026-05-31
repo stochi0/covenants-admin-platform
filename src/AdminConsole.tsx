@@ -38,7 +38,15 @@ const PAGE_SIZE = 25;
 
 const RELATION_SEARCH_RESULT_LIMIT = 6;
 
-export default function AdminConsole() {
+interface AdminConsoleProps {
+  adminUser?: {
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+}
+
+export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   const [tables, setTables] = useState<TableMeta[]>([]);
   const [selectedTableName, setSelectedTableName] = useState<string>("");
   const [records, setRecords] = useState<RowRecord[]>([]);
@@ -787,6 +795,12 @@ export default function AdminConsole() {
           <p className="sidebar-copy">
             Open internal tooling for operating the Supabase-backed business tables.
           </p>
+          <div className="admin-session">
+            <span>{getAdminDisplayName(adminUser)}</span>
+            <button onClick={() => void window.Clerk?.signOut()} type="button">
+              Sign out
+            </button>
+          </div>
         </div>
 
         <nav className="table-list">
@@ -2081,6 +2095,13 @@ function createExportFilename(tableName: string) {
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
+  const token = await window.Clerk?.session?.getToken();
+
+  if (!token) {
+    throw new Error("You must be signed in to continue.");
+  }
+
+  headers.set("Authorization", `Bearer ${token}`);
 
   const response = await fetch(url, {
     ...init,
@@ -2100,8 +2121,24 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
+function getAdminDisplayName(adminUser: AdminConsoleProps["adminUser"]) {
+  const name = [adminUser?.firstName, adminUser?.lastName].filter(Boolean).join(" ");
+  return name || adminUser?.email || "Admin";
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+declare global {
+  interface Window {
+    Clerk?: {
+      session?: {
+        getToken: () => Promise<string | null>;
+      } | null;
+      signOut: () => Promise<void>;
+    };
+  }
 }
 
 function toDateTimeLocalValue(value: string) {
