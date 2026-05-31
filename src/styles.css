@@ -93,7 +93,7 @@ button:disabled {
 .shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 280px 1fr;
 }
 
 .auth-screen {
@@ -142,7 +142,7 @@ button:disabled {
   top: 0;
   height: 100vh;
   overflow: auto;
-  padding: 28px;
+  padding: 22px;
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(244, 252, 249, 0.56)),
@@ -184,8 +184,8 @@ button:disabled {
 
 .table-list {
   display: grid;
-  gap: 10px;
-  margin-top: 32px;
+  gap: 8px;
+  margin-top: 24px;
 }
 
 .admin-session {
@@ -209,8 +209,8 @@ button:disabled {
 .table-link {
   border: 1px solid transparent;
   background: var(--panel);
-  padding: 15px 16px;
-  border-radius: 18px;
+  padding: 12px 14px;
+  border-radius: 10px;
   text-align: left;
   display: grid;
   gap: 6px;
@@ -236,9 +236,9 @@ button:disabled {
 
 .workspace {
   min-width: 0;
-  padding: 32px;
+  padding: 24px;
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .hero-tags {
@@ -260,8 +260,8 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   gap: 18px;
-  padding: 28px;
-  border-radius: 28px;
+  padding: 22px;
+  border-radius: 12px;
   background:
     linear-gradient(120deg, rgba(255, 255, 255, 0.94), rgba(237, 250, 246, 0.86)),
     var(--paper);
@@ -270,7 +270,7 @@ button:disabled {
 }
 
 .hero h2 {
-  font-size: clamp(2rem, 3vw, 2.8rem);
+  font-size: 2.1rem;
 }
 
 .hero-stats {
@@ -306,8 +306,8 @@ button:disabled {
 }
 
 .panel {
-  border-radius: 24px;
-  padding: 20px;
+  border-radius: 12px;
+  padding: 18px;
 }
 
 .controls {
@@ -359,8 +359,8 @@ button:disabled {
 .field input,
 .field select {
   width: 100%;
-  padding: 14px 15px;
-  border-radius: 16px;
+  padding: 11px 12px;
+  border-radius: 8px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.92);
   color: var(--text);
@@ -380,8 +380,8 @@ button:disabled {
 .row-actions button,
 .pagination button {
   border: 0;
-  border-radius: 999px;
-  padding: 12px 16px;
+  border-radius: 8px;
+  padding: 10px 14px;
 }
 
 .primary-button {
@@ -481,8 +481,8 @@ th {
 }
 
 .dialog {
-  width: min(760px, 100%);
-  border-radius: 28px;
+  width: min(1100px, 100%);
+  border-radius: 14px;
   padding: 24px;
   max-height: calc(100vh - 40px);
   overflow: auto;
@@ -512,8 +512,8 @@ th {
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .field {
@@ -557,10 +557,238 @@ th {
 
 .auto-managed-note {
   padding: 14px 16px;
-  border-radius: 18px;
+  border-radius: 10px;
   background: var(--accent-surface);
   border: 1px solid var(--accent-surface-strong);
   color: var(--accent-strong);
+}
+
+.relation-editor {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 252, 250, 0.9));
+}
+
+.relation-editor-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+}
+
+.relation-editor-head strong {
+  color: var(--accent-strong);
+}
+
+.relation-status {
+  color: var(--muted);
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.relation-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.relation-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--text);
+}
+
+.relation-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relation-tab strong {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+.relation-tab.active {
+  border-color: rgba(var(--accent-rgb), 0.34);
+  background: var(--accent-surface);
+  color: var(--accent-strong);
+}
+
+.relation-tab-panel,
+.relation-search,
+.relation-row-list {
+  display: grid;
+  gap: 12px;
+}
+
+.relation-search {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.relation-search-input {
+  margin: 0;
+}
+
+.relation-results {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.relation-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  text-align: left;
+}
+
+.relation-result span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.relation-result strong {
+  color: var(--accent-strong);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.relation-result:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.28);
+  background: var(--accent-surface);
+}
+
+.relation-result.muted,
+.relation-empty {
+  color: var(--muted);
+}
+
+.relation-result.muted {
+  cursor: default;
+}
+
+.quick-create {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.quick-create .field {
+  width: min(220px, 100%);
+}
+
+.relation-empty {
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.62);
+  text-align: center;
+}
+
+.relation-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.relation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.relation-chip span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.relation-chip button {
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.relation-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.product-relation-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.relation-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.relation-row-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.toggle-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.toggle-field input {
+  width: 16px;
+  height: 16px;
+}
+
+.accreditation-fields {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.2fr) minmax(140px, 1fr) minmax(130px, 0.8fr) minmax(130px, 0.8fr);
+  gap: 10px;
 }
 
 .upload-zone {
@@ -609,7 +837,11 @@ th {
   }
 
   .form-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .accreditation-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -623,7 +855,25 @@ th {
   .dialog-actions,
   .pagination,
   .row-actions,
-  .search-input-group {
+  .search-input-group,
+  .relation-editor-head,
+  .product-relation-row,
+  .relation-row-title {
     flex-wrap: wrap;
+  }
+
+  .form-grid,
+  .relation-tabs,
+  .accreditation-fields,
+  .product-relation-row {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-create {
+    display: grid;
+  }
+
+  .quick-create .field {
+    width: 100%;
   }
 }

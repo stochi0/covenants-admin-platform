@@ -147,7 +147,7 @@ export async function createRecord(
     throw new Error(`${table.label} is read-only.`);
   }
 
-  const payload = await prepareRecordForPersist(table, sanitizeRecord(table, record, "create"));
+  const payload = await prepareRecordForPersist(table, prepareCreatePayload(table, sanitizeRecord(table, record, "create"), record));
   const { data, error } = await supabase
     .from(table.name)
     .insert(payload)
@@ -159,6 +159,14 @@ export async function createRecord(
   }
 
   return data;
+}
+
+function prepareCreatePayload(table: TableMeta, payload: RecordInput, originalRecord: RecordInput): RecordInput {
+  if (table.name === "products" && isBlankImportValue(payload.id)) {
+    payload.id = createProductId(originalRecord);
+  }
+
+  return payload;
 }
 
 export async function updateRecord(
@@ -294,13 +302,29 @@ async function prepareRecordForPersist(table: TableMeta, payload: RecordInput): 
   return payload;
 }
 
-export async function getOptions(tableName: string): Promise<OptionsResponse> {
+export async function getOptions(
+  tableName: string,
+  options: {
+    search?: string;
+    limit?: number;
+  } = {}
+): Promise<OptionsResponse> {
   const table = getTableOrThrow(tableName);
   const primaryKey = table.primaryKeys[0];
   const displayColumn = table.displayColumn;
-  const columns = primaryKey === displayColumn ? [primaryKey] : [primaryKey, displayColumn];
+  const searchColumns = table.searchableColumns
+    .map((columnName) => table.columns.find((column) => column.name === columnName))
+    .filter((column): column is TableMeta["columns"][number] => Boolean(column))
+    .filter((column) => ["text", "custom", "date", "timestamp"].includes(column.kind))
+    .map((column) => column.name);
+  const columns = [...new Set([primaryKey, displayColumn, ...searchColumns])];
 
-  let query = supabase.from(table.name).select(columns.join(",")).limit(200);
+  let query = supabase.from(table.name).select(columns.join(",")).limit(options.limit ?? 50);
+  const search = options.search?.trim();
+  if (search && searchColumns.length > 0) {
+    const escaped = escapeForIlike(search);
+    query = query.or(searchColumns.map((columnName) => `${columnName}.ilike.%${escaped}%`).join(","));
+  }
   query = query.order(displayColumn, { ascending: true });
 
   const { data, error } = await query;
@@ -757,6 +781,29 @@ function isUuidLike(value: unknown): boolean {
 
 function normalizeTextValue(value: string): string {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function createProductId(record: RecordInput): string {
+  const casNumber = typeof record.cas_number === "string" ? record.cas_number.trim() : "";
+  if (casNumber) {
+    return `prod-${slugifyIdentifier(casNumber)}`;
+  }
+
+  const productName = typeof record.product_name === "string" ? record.product_name.trim() : "";
+  if (!productName) {
+    throw new Error("Product creation requires a product name or CAS number.");
+  }
+
+  return `prod-${slugifyIdentifier(productName)}`;
+}
+
+function slugifyIdentifier(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || crypto.randomUUID();
 }
 
 async function inferRegionIdFromAddress(address: unknown): Promise<string | null> {
