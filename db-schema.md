@@ -99,12 +99,17 @@ CREATE TABLE public.spatial_ref_sys (
   CONSTRAINT spatial_ref_sys_pkey PRIMARY KEY (srid)
 );
 CREATE TABLE public.users (
-  id uuid NOT NULL,
-  email text,
-  full_name text,
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  clerk_user_id text NOT NULL,
+  email text NOT NULL,
   role text NOT NULL DEFAULT 'viewer'::text,
+  first_name text,
+  last_name text,
+  image_url text,
+  email_verified boolean NOT NULL DEFAULT false,
+  last_seen_at timestamp with time zone,
+  deleted_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT users_pkey PRIMARY KEY (id),
-  CONSTRAINT users_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+  CONSTRAINT users_pkey PRIMARY KEY (id)
 );

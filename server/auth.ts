@@ -156,14 +156,18 @@ async function verifyClerkToken(token: string): Promise<ClerkSessionClaims> {
   return claims;
 }
 
-export async function authenticateAdmin(headers: HeaderMap): Promise<AdminUser> {
+export async function verifyClerkHeaders(headers: HeaderMap): Promise<ClerkSessionClaims> {
   const authorization = getHeader(headers, "authorization");
   const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : null;
   if (!token) {
     throw new Error("Missing authorization token.");
   }
 
-  const claims = await verifyClerkToken(token);
+  return verifyClerkToken(token);
+}
+
+export async function authenticateAdmin(headers: HeaderMap): Promise<AdminUser> {
+  const claims = await verifyClerkHeaders(headers);
   const { data, error } = await supabase
     .from("users")
     .select("id, clerk_user_id, email, first_name, last_name, role")

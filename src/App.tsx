@@ -1,4 +1,4 @@
-import { Show, SignInButton, SignOutButton, useAuth } from "@clerk/react";
+import { Show, SignInButton, SignOutButton, useAuth, useUser } from "@clerk/react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import AdminConsole from "./AdminConsole";
@@ -39,12 +39,13 @@ export default function App() {
 
 function AdminGate() {
   const { getToken, isLoaded } = useAuth();
+  const { user, isLoaded: isUserLoaded } = useUser();
   const [adminUser, setAdminUser] = useState<AdminMeResponse["user"] | null>(null);
   const [status, setStatus] = useState<"loading" | "authorized" | "forbidden" | "error">("loading");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!isLoaded || !isUserLoaded || !user) {
       return;
     }
 
@@ -58,6 +59,28 @@ function AdminGate() {
         const token = await getToken();
         if (!token) {
           throw new Error("You must be signed in to continue.");
+        }
+
+        const syncResponse = await fetch("/api/users/sync", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            email: user.primaryEmailAddress?.emailAddress,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            imageUrl: user.imageUrl,
+            emailVerified: user.primaryEmailAddress?.verification?.status === "verified"
+          })
+        });
+        const syncData = (await syncResponse.json().catch(() => null)) as
+          | { error?: string; details?: string }
+          | null;
+
+        if (!syncResponse.ok) {
+          throw new Error(syncData?.details ?? syncData?.error ?? "Unable to sync your account.");
         }
 
         const response = await fetch("/api/auth/me", {
@@ -95,9 +118,9 @@ function AdminGate() {
     return () => {
       cancelled = true;
     };
-  }, [getToken, isLoaded]);
+  }, [getToken, isLoaded, isUserLoaded, user]);
 
-  if (!isLoaded || status === "loading") {
+  if (!isLoaded || !isUserLoaded || status === "loading") {
     return (
       <AuthScreen
         eyebrow="Checking Access"

@@ -20,6 +20,7 @@
     "express": "^5.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "svix": "^1.96.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
