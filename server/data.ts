@@ -130,10 +130,8 @@ async function findForeignKeySearchMatches(column: TableMeta["columns"][number],
     throw new Error(error.message);
   }
 
-  return [
-    ...new Set((data ?? []).map((row) => String((row as unknown as RecordInput)[column.foreignKey!.referencesColumn] ?? "")))
-      .values()
-  ]
+  const rows = (data ?? []) as RecordInput[];
+  return [...new Set(rows.map((row) => String(row[column.foreignKey!.referencesColumn] ?? ""))).values()]
     .filter(Boolean);
 }
 
@@ -430,17 +428,23 @@ export async function getFacilityRelations(facilityId: string): Promise<Facility
 
   return {
     facilityId,
-    chemistries: (chemistries.data ?? []).map((row) => ({
+    chemistries: ((chemistries.data ?? []) as Array<{ chemistry_id: unknown }>).map((row) => ({
       chemistryId: String((row as { chemistry_id: unknown }).chemistry_id)
     })),
-    products: (products.data ?? []).map((row) => {
+    products: ((products.data ?? []) as Array<{ product_id: unknown; is_primary: unknown }>).map((row) => {
       const typed = row as { product_id: unknown; is_primary: unknown };
       return {
         productId: String(typed.product_id),
         isPrimary: Boolean(typed.is_primary)
       };
     }),
-    accreditations: (accreditations.data ?? []).map((row) => {
+    accreditations: ((accreditations.data ?? []) as Array<{
+      accreditation_id: unknown;
+      awarding_body: unknown;
+      certificate_number: unknown;
+      awarded_at: unknown;
+      expires_at: unknown;
+    }>).map((row) => {
       const typed = row as {
         accreditation_id: unknown;
         awarding_body: unknown;
@@ -894,7 +898,7 @@ async function listRegionsForInference(): Promise<Array<{ id: string; name: stri
     throw new Error(error.message);
   }
 
-  return (data ?? []).map((row) => ({
+  return ((data ?? []) as RecordInput[]).map((row) => ({
     id: String((row as unknown as RecordInput).id ?? ""),
     name: String((row as unknown as RecordInput).name ?? "")
   }));
