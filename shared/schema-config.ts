@@ -86,7 +86,7 @@ export const schemaTables: TableMeta[] = [
   {
     name: "facilities",
     label: "Facilities",
-    description: "Manage facility records, soft deletes, capacity, and linked products, chemistries, and accreditations.",
+    description: "Manage facilities, availability, capacity, and linked products, chemistries, and accreditations.",
     primaryKeys: ["id"],
     importMatchers: [["company_id", "name"]],
     displayColumn: "name",

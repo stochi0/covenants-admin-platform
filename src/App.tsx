@@ -80,7 +80,7 @@ function AdminGate() {
           | null;
 
         if (!syncResponse.ok) {
-          throw new Error(syncData?.details ?? syncData?.error ?? "Unable to sync your account.");
+          throw new Error(syncData?.error ?? "Unable to prepare your account.");
         }
 
         const response = await fetch("/api/auth/me", {
@@ -93,7 +93,7 @@ function AdminGate() {
           | null;
 
         if (!response.ok) {
-          const errorMessage = data?.details ?? data?.error ?? "Unable to verify admin access.";
+          const errorMessage = data?.error ?? "Unable to verify admin access.";
           if (!cancelled) {
             setStatus(response.status === 403 ? "forbidden" : "error");
             setMessage(errorMessage);
@@ -125,7 +125,7 @@ function AdminGate() {
       <AuthScreen
         eyebrow="Checking Access"
         title="Verifying admin role"
-        message="Confirming your account against the Covenants user table."
+        message="Confirming your account has access to this admin area."
       />
     );
   }

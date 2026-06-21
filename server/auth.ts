@@ -201,8 +201,7 @@ export async function requireAdmin(req: AuthenticatedAdminRequest, res: Response
   } catch (error) {
     const status = error instanceof Error && error.name === "ForbiddenError" ? 403 : 401;
     res.status(status).json({
-      error: status === 403 ? "Forbidden" : "Unauthorized",
-      details: error instanceof Error ? error.message : "Authentication failed."
+      error: status === 403 ? "Admin access is required." : "Authentication failed."
     });
   }
 }

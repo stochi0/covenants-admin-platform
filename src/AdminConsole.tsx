@@ -485,9 +485,9 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       return "";
     }
 
-    return `This file cannot safely match existing ${selectedTable.label.toLowerCase()} rows yet. Include ${importMatcherSummary.join(
+    return `This file cannot safely match existing ${selectedTable.label.toLowerCase()} entries yet. Include ${importMatcherSummary.join(
       " or "
-    )} so imports update existing records instead of creating duplicates.`;
+    )} so imports update existing entries instead of creating duplicates.`;
   }, [activeImportMatcher, importMatcherSummary, importMatchers.length, importState, selectedTable]);
 
   async function loadSchema() {
@@ -595,7 +595,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   }
 
   function handleDeleteImportRow(rowIndex: number) {
-    if (!window.confirm(`Delete imported row #${rowIndex + 1}?`)) {
+    if (!window.confirm(`Delete imported item #${rowIndex + 1}?`)) {
       return;
     }
 
@@ -632,7 +632,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       return current;
     });
 
-    setNotice(`Removed imported row #${rowIndex + 1}.`);
+    setNotice(`Removed imported item #${rowIndex + 1}.`);
   }
 
   function handleSaveImportRow(event: FormEvent<HTMLFormElement>) {
@@ -654,7 +654,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
         )
       }
     });
-    setNotice(`Updated imported row #${importEditor.rowIndex + 1}.`);
+    setNotice(`Updated imported item #${importEditor.rowIndex + 1}.`);
     setImportEditor(null);
   }
 
@@ -674,13 +674,13 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       setError("");
       if (selectedTable.name === "facilities" && facilityRelationsDraft) {
         if (facilityRelationsDraft.chemistries?.some((row) => !row.chemistryId)) {
-          throw new Error("Each chemistry row must select a chemistry.");
+          throw new Error("Each chemistry entry must select a chemistry.");
         }
         if (facilityRelationsDraft.products?.some((row) => !row.productId)) {
-          throw new Error("Each product row must select a product.");
+          throw new Error("Each product entry must select a product.");
         }
         if (facilityRelationsDraft.accreditations?.some((row) => !row.accreditationId)) {
-          throw new Error("Each accreditation row must select an accreditation.");
+          throw new Error("Each accreditation entry must select an accreditation.");
         }
         if (hasDuplicateValues((facilityRelationsDraft.chemistries ?? []).map((row) => row.chemistryId))) {
           throw new Error("A facility cannot include the same chemistry more than once.");
@@ -717,8 +717,8 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
 
       setNotice(
         editor.mode === "create"
-          ? `${selectedTable.label} row created.`
-          : `${selectedTable.label} row updated.`
+          ? `${selectedTable.label} entry created.`
+          : `${selectedTable.label} entry updated.`
       );
       closePanels();
       await refreshRecords();
@@ -796,7 +796,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
 
     const identifier = getRowTitle(selectedTable, row, lookups);
 
-    if (!window.confirm(`Delete this row?\n${identifier}`)) {
+    if (!window.confirm(`Delete this entry?\n${identifier}`)) {
       return;
     }
 
@@ -809,7 +809,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
         body: JSON.stringify(row)
       });
 
-      setNotice(`${selectedTable.label} row deleted.`);
+      setNotice(`${selectedTable.label} entry deleted.`);
       await refreshRecords();
     } catch (apiError) {
       setError(getErrorMessage(apiError));
@@ -871,7 +871,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, selectedTable.label.slice(0, 31) || selectedTable.name);
       XLSX.writeFile(workbook, createExportFilename(selectedTable.name));
-      setNotice(`Exported ${rows.length} ${selectedTable.label.toLowerCase()} rows to Excel.`);
+      setNotice(`Exported ${rows.length} ${selectedTable.label.toLowerCase()} entries to Excel.`);
     } catch (exportError) {
       setError(getErrorMessage(exportError));
     } finally {
@@ -899,7 +899,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       });
 
       setNotice(
-        `Imported ${response.processed} rows into ${selectedTable.label} (${response.created} created, ${response.updated} updated).`
+        `Imported ${response.processed} entries into ${selectedTable.label} (${response.created} created, ${response.updated} updated).`
       );
       closePanels();
       await refreshRecords();
@@ -951,11 +951,11 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   }
 
   if (loadingSchema) {
-    return <div className="shell loading-screen">Loading schema…</div>;
+    return <div className="shell loading-screen">Loading admin tools...</div>;
   }
 
   if (!selectedTable) {
-    return <div className="shell loading-screen">No admin table metadata is configured.</div>;
+    return <div className="shell loading-screen">No admin tools are configured.</div>;
   }
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -965,10 +965,10 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <p className="eyebrow">Supabase Admin</p>
+          <p className="eyebrow">Admin Console</p>
           <h1>Covenants Control Room</h1>
           <p className="sidebar-copy">
-            Open internal tooling for operating the Supabase-backed business tables.
+            Open internal tooling for managing Covenants business data.
           </p>
           <div className="admin-session">
             <span>{getAdminDisplayName(adminUser)}</span>
@@ -1007,17 +1007,17 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
         <section className="workspace-header">
           <div className="table-summary">
             <div className="table-title-block">
-              <p className="eyebrow">Table</p>
+              <p className="eyebrow">Workspace</p>
               <h2>{selectedTable.label}</h2>
               <p className="hero-copy">
                 {selectedTable.description ??
-                  `Manage ${selectedTable.label.toLowerCase()} with safe forms, bulk import, and auto-managed system fields.`}
+                  `Manage ${selectedTable.label.toLowerCase()} with safe forms, bulk import, and protected system fields.`}
               </p>
             </div>
 
-            <div className="hero-stats" aria-label="Table stats">
+            <div className="hero-stats" aria-label="Workspace stats">
               <div className="stat-card">
-                <span>Total Rows</span>
+                <span>Total Entries</span>
                 <strong>{total}</strong>
               </div>
               <div className="stat-card">
@@ -1067,7 +1067,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
               Import
             </button>
             <button className="primary-button" disabled={selectedTable.readOnly} onClick={openCreateEditor} type="button">
-              Add Row
+              Add Entry
             </button>
           </div>
         </section>
@@ -1076,7 +1076,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
           <div className="controls-copy">
             <form className="search-form" onSubmit={handleSearchSubmit}>
               <label className="search">
-                <span>Search rows</span>
+                <span>Search entries</span>
                 <div className="search-input-group">
                   <input
                     value={searchInput}
@@ -1091,7 +1091,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
               </label>
             </form>
             <p className="helper-note">
-              Auto-generated fields stay hidden. Imports ignore them even if they appear in the sheet.
+              System-managed fields stay hidden. Imports ignore them even if they appear in the sheet.
             </p>
           </div>
         </section>
@@ -1105,7 +1105,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
               Page {page + 1} of {pageCount}
             </span>
             <span className={loadingRecords ? "table-loading-status active" : "table-loading-status"}>
-              {loadingRecords ? "Loading rows…" : `${records.length} rows loaded`}
+              {loadingRecords ? "Loading entries..." : `${records.length} entries loaded`}
             </span>
           </div>
 
@@ -1123,7 +1123,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                 {records.length === 0 ? (
                   <tr>
                     <td colSpan={visibleColumns.length + 1}>
-                      <div className="empty-state">No rows matched the current query.</div>
+                      <div className="empty-state">No entries matched the current query.</div>
                     </td>
                   </tr>
                 ) : (
@@ -1184,10 +1184,10 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             <div className="dialog-head">
               <div>
                 <p className="eyebrow">{selectedTable.readOnly ? "View" : editor.mode === "create" ? "Create" : "Edit"}</p>
-                <h3>{selectedTable.label} Row</h3>
+                <h3>{selectedTable.label} Entry</h3>
                 <p className="dialog-copy">
                   {selectedTable.readOnly
-                    ? "This audit table is read-only."
+                    ? "This audit area is read-only."
                     : "System-managed fields like generated IDs and timestamps stay hidden automatically."}
                 </p>
               </div>
@@ -1276,7 +1276,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                 </button>
                 {selectedTable.readOnly ? null : (
                   <button className="primary-button" disabled={busy} type="submit">
-                    {busy ? "Saving…" : editor.mode === "create" ? "Create Row" : "Save Changes"}
+                    {busy ? "Saving..." : editor.mode === "create" ? "Create Entry" : "Save Changes"}
                   </button>
                 )}
               </div>
@@ -1293,8 +1293,8 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                 <p className="eyebrow">Excel Import</p>
                 <h3>{selectedTable.label}</h3>
                 <p className="dialog-copy">
-                  Match spreadsheet headers to database columns. Existing rows are updated when the import matcher
-                  columns line up, blank cells keep existing values, and generated IDs and timestamps are ignored.
+                  Match spreadsheet headers to the supported import fields. Existing entries are updated when the
+                  matching fields line up, blank cells keep existing values, and system-managed fields are ignored.
                 </p>
               </div>
             </div>
@@ -1305,14 +1305,14 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                 onChange={(event) => void handleFileSelected(event.target.files?.[0] ?? null)}
                 type="file"
               />
-              <span>Choose an Excel file whose column headers match the table columns.</span>
+              <span>Choose an Excel file whose headers match the supported import fields.</span>
             </label>
 
             <div className="import-summary">
               <strong>{importState.fileName || "No file selected yet"}</strong>
               <span>
                 {importState.selectedSheetName ? `Sheet: ${importState.selectedSheetName} · ` : ""}
-                {importState.rows.length} parsed rows
+                {importState.rows.length} parsed entries
               </span>
             </div>
 
@@ -1333,9 +1333,9 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             ) : null}
 
             <div className="auto-managed-note">
-              <strong>Excel headers (exact column names)</strong>
+              <strong>Excel headers</strong>
               <p className="helper-note import-helper">
-                Your spreadsheet column headers must match these names exactly.
+                Your spreadsheet headers must match these names exactly.
               </p>
               <div className="import-header-grid">
                 <div>
@@ -1359,7 +1359,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                     : "None"}
                 </div>
                 <div>
-                  <strong>Matches Existing Rows By:</strong>{" "}
+                  <strong>Matches Existing Entries By:</strong>{" "}
                   {importMatcherSummary.length > 0
                     ? importMatcherSummary.map((name) => (
                         <code className="import-code" key={`match-${name}`}>
@@ -1387,8 +1387,8 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
               </div>
             ) : activeImportMatcher ? (
               <div className="helper-note import-match-note">
-                This file will match existing rows using <code>{activeImportMatcher.join(" + ")}</code>. Non-empty
-                cells update matching rows, while blank cells keep the current value.
+                This file will match existing entries using <code>{activeImportMatcher.join(" + ")}</code>. Non-empty
+                cells update matching entries, while blank cells keep the current value.
               </div>
             ) : null}
 
@@ -1442,7 +1442,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                 onClick={() => void handleImportSubmit()}
                 type="button"
               >
-                {busy ? "Importing…" : "Import Rows"}
+                {busy ? "Importing..." : "Import Entries"}
               </button>
             </div>
           </section>
@@ -1454,11 +1454,11 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
           <section className="dialog">
             <div className="dialog-head">
               <div>
-                <p className="eyebrow">Edit Imported Row</p>
+                <p className="eyebrow">Edit Imported Entry</p>
                 <h3>
-                  {selectedTable.label} Row #{importEditor.rowIndex + 1}
+                  {selectedTable.label} Entry #{importEditor.rowIndex + 1}
                 </h3>
-                <p className="dialog-copy">Review this parsed row before importing it.</p>
+                <p className="dialog-copy">Review this parsed entry before importing it.</p>
               </div>
               <button className="close-button" onClick={closeImportEditor} type="button">
                 Close
@@ -1526,7 +1526,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                   Cancel
                 </button>
                 <button className="primary-button" type="submit">
-                  Save Row
+                  Save Entry
                 </button>
               </div>
             </form>
@@ -2217,7 +2217,7 @@ function getRowTitle(table: TableMeta, row: RowRecord, lookups: LookupCache) {
     return formatColumnValue(firstReadable, row[firstReadable.name], lookups);
   }
 
-  return `${table.label} row`;
+  return `${table.label} entry`;
 }
 
 function formatColumnValue(

@@ -76,9 +76,9 @@ app.post("/api/users/sync", async (req, res) => {
 
     res.status(200).json({ id });
   } catch (error) {
+    console.error("User sync failed:", error);
     res.status(500).json({
-      error: "User sync failed",
-      details: error instanceof Error ? error.message : "Unknown error"
+      error: "Unable to prepare your account."
     });
   }
 });
