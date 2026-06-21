@@ -26,7 +26,7 @@ export default function App() {
             </SignInButton>
           }
           eyebrow="Admin Access"
-          title="Covenants Control Room"
+          title="Covenants Admin Platform"
           message="Sign in with your authorized admin account to continue."
         />
       </Show>

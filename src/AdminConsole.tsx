@@ -966,7 +966,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       <aside className="sidebar">
         <div className="brand">
           <p className="eyebrow">Admin Console</p>
-          <h1>Covenants Control Room</h1>
+          <h1>Covenants Admin Platform</h1>
           <p className="sidebar-copy">
             Open internal tooling for managing Covenants business data.
           </p>
