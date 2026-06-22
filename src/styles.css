@@ -95,8 +95,12 @@ button:disabled {
 .shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr);
   background: var(--bg);
+}
+
+.shell.sidebar-collapsed {
+  grid-template-columns: 72px minmax(0, 1fr);
 }
 
 .auth-screen {
@@ -145,26 +149,9 @@ button:disabled {
   top: 0;
   height: 100vh;
   overflow: auto;
-  padding: 18px 12px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(8, 28, 25, 0.96), rgba(5, 14, 18, 0.98)),
-    #061012;
-  color: rgba(255, 255, 255, 0.92);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 22px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
-}
-
-.sidebar::-webkit-scrollbar {
-  width: 8px;
-}
-
-.sidebar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.24);
-  border-radius: 999px;
+  padding: 14px;
+  border-right: 1px solid var(--line);
+  background: #fbfdfc;
 }
 
 .brand h1,
@@ -177,23 +164,24 @@ button:disabled {
 }
 
 .brand h1 {
-  max-width: 210px;
-  font-size: 1.34rem;
+  max-width: 190px;
+  font-size: 2rem;
   letter-spacing: 0;
   font-weight: 800;
 }
 
-.brand-mark {
-  width: 34px;
-  height: 34px;
+.sidebar-toggle {
   display: grid;
   place-items: center;
-  margin-bottom: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
-  font-weight: 800;
+  width: 32px;
+  height: 32px;
+  margin: 0 0 12px auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--accent-strong);
+  font-weight: 700;
+  line-height: 1;
 }
 
 .eyebrow {
@@ -219,36 +207,21 @@ button:disabled {
   margin: 10px 0 0;
   font-size: 0.86rem;
   line-height: 1.35;
-  color: rgba(255, 255, 255, 0.58);
 }
 
 .table-list {
   display: grid;
-  align-content: start;
-  gap: 5px;
-  min-height: 0;
-  overflow: auto;
-  padding-right: 3px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
-}
-
-.table-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.table-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 999px;
+  gap: 4px;
+  margin-top: 16px;
 }
 
 .admin-session {
   display: grid;
   gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.64);
 }
 
 .admin-session button {
@@ -256,15 +229,14 @@ button:disabled {
   border: 0;
   border-radius: 7px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 .table-link {
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(255, 255, 255, 0.82);
-  padding: 10px 12px;
+  padding: 9px 10px;
   border-radius: 8px;
   text-align: left;
   display: grid;
@@ -278,20 +250,56 @@ button:disabled {
 
 .table-link strong {
   font-size: 0.74rem;
-  color: rgba(255, 255, 255, 0.46);
+  color: var(--muted);
   font-weight: 500;
 }
 
 .table-link:hover,
 .table-link.active {
   transform: none;
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.09);
-  color: #ffffff;
+  border-color: var(--line-strong);
+  background: var(--paper);
 }
 
-.table-link.active strong {
-  color: rgba(255, 255, 255, 0.68);
+.sidebar-collapsed .sidebar {
+  padding: 14px 10px;
+  overflow-x: hidden;
+}
+
+.sidebar-collapsed .sidebar-toggle {
+  margin-right: auto;
+}
+
+.sidebar-collapsed .brand h1,
+.sidebar-collapsed .brand .eyebrow,
+.sidebar-collapsed .sidebar-copy,
+.sidebar-collapsed .admin-session {
+  display: none;
+}
+
+.sidebar-collapsed .table-list {
+  margin-top: 0;
+}
+
+.sidebar-collapsed .table-link {
+  width: 52px;
+  min-height: 44px;
+  padding: 8px 4px;
+  place-items: center;
+  text-align: center;
+}
+
+.sidebar-collapsed .table-link::before {
+  content: attr(data-short);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.sidebar-collapsed .table-link span,
+.sidebar-collapsed .table-link strong {
+  display: none;
 }
 
 .workspace {
@@ -1218,33 +1226,29 @@ tbody tr:hover .actions-cell {
 }
 
 @media (max-width: 980px) {
-  .shell {
-    grid-template-columns: 68px minmax(0, 1fr);
+  .shell,
+  .shell.sidebar-collapsed {
+    grid-template-columns: 1fr;
   }
 
   .sidebar {
-    position: sticky;
-    height: 100vh;
-    overflow: auto;
-    padding: 14px 8px;
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    position: static;
+    height: auto;
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .brand {
     display: grid;
-    justify-items: center;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: end;
   }
 
   .brand h1 {
-    display: none;
-  }
-
-  .brand .eyebrow {
-    display: none;
-  }
-
-  .brand-mark {
-    margin-bottom: 0;
+    max-width: none;
+    font-size: 1.45rem;
   }
 
   .sidebar-copy {
@@ -1252,59 +1256,43 @@ tbody tr:hover .actions-cell {
   }
 
   .admin-session {
-    justify-items: center;
-    padding-top: 12px;
-  }
-
-  .admin-session span {
-    display: none;
-  }
-
-  .admin-session button {
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    overflow: hidden;
-    text-indent: -999px;
-    position: relative;
-  }
-
-  .admin-session button::after {
-    content: "Out";
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    text-indent: 0;
-    font-size: 0.68rem;
-    font-weight: 700;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+    justify-items: end;
   }
 
   .table-list {
-    justify-items: center;
-    padding-right: 0;
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 4px;
   }
 
   .table-link {
-    width: 44px;
-    height: 44px;
-    padding: 0;
+    min-width: 160px;
+  }
+
+  .shell.sidebar-collapsed .brand h1,
+  .shell.sidebar-collapsed .brand .eyebrow,
+  .shell.sidebar-collapsed .admin-session {
     display: grid;
-    place-items: center;
-    text-align: center;
-    gap: 0;
   }
 
-  .table-link::before {
-    content: attr(data-short);
-    font-size: 0.72rem;
-    font-weight: 800;
-    text-transform: uppercase;
+  .shell.sidebar-collapsed .table-link span,
+  .shell.sidebar-collapsed .table-link strong {
+    display: block;
   }
 
-  .table-link span,
-  .table-link strong {
-    display: none;
+  .shell.sidebar-collapsed .table-link::before {
+    content: none;
+  }
+
+  .shell.sidebar-collapsed .table-link {
+    width: auto;
+    min-height: auto;
+    padding: 9px 10px;
+    place-items: stretch;
+    text-align: left;
   }
 
   .workspace-header,
@@ -1333,12 +1321,9 @@ tbody tr:hover .actions-cell {
 }
 
 @media (max-width: 640px) {
-  .workspace {
-    padding: 10px;
-  }
-
+  .workspace,
   .sidebar {
-    padding: 10px 6px;
+    padding: 10px;
   }
 
   .actions,

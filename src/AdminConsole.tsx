@@ -70,6 +70,7 @@ interface AdminConsoleProps {
 export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   const [tables, setTables] = useState<TableMeta[]>([]);
   const [selectedTableName, setSelectedTableName] = useState<string>("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [records, setRecords] = useState<RowRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -962,15 +963,30 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   const isFacilityEditor = selectedTable.name === "facilities" && Boolean(editor);
 
   return (
-    <div className="shell">
+    <div className={sidebarCollapsed ? "shell sidebar-collapsed" : "shell"}>
       <aside className="sidebar">
+        <button
+          className="sidebar-toggle"
+          type="button"
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!sidebarCollapsed}
+          onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        >
+          {sidebarCollapsed ? ">" : "<"}
+        </button>
+
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true">C</div>
           <p className="eyebrow">Admin Console</p>
           <h1>Covenants Admin Platform</h1>
           <p className="sidebar-copy">
             Open internal tooling for managing Covenants business data.
           </p>
+          <div className="admin-session">
+            <span>{getAdminDisplayName(adminUser)}</span>
+            <button onClick={() => void window.Clerk?.signOut()} type="button">
+              Sign out
+            </button>
+          </div>
         </div>
 
         <nav className="table-list">
@@ -998,13 +1014,6 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             </button>
           ))}
         </nav>
-
-        <div className="admin-session">
-          <span>{getAdminDisplayName(adminUser)}</span>
-          <button onClick={() => void window.Clerk?.signOut()} type="button">
-            Sign out
-          </button>
-        </div>
       </aside>
 
       <main className="workspace">
