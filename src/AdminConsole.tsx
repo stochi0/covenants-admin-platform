@@ -965,17 +965,12 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
+          <div className="brand-mark" aria-hidden="true">C</div>
           <p className="eyebrow">Admin Console</p>
           <h1>Covenants Admin Platform</h1>
           <p className="sidebar-copy">
             Open internal tooling for managing Covenants business data.
           </p>
-          <div className="admin-session">
-            <span>{getAdminDisplayName(adminUser)}</span>
-            <button onClick={() => void window.Clerk?.signOut()} type="button">
-              Sign out
-            </button>
-          </div>
         </div>
 
         <nav className="table-list">
@@ -983,6 +978,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             <button
               key={table.name}
               className={table.name === selectedTable.name ? "table-link active" : "table-link"}
+              data-short={table.label.slice(0, 2)}
               onClick={() => {
                 startTransition(() => {
                   setSelectedTableName(table.name);
@@ -994,6 +990,7 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
                   closePanels();
                 });
               }}
+              title={table.label}
               type="button"
             >
               <span>{table.label}</span>
@@ -1001,6 +998,13 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             </button>
           ))}
         </nav>
+
+        <div className="admin-session">
+          <span>{getAdminDisplayName(adminUser)}</span>
+          <button onClick={() => void window.Clerk?.signOut()} type="button">
+            Sign out
+          </button>
+        </div>
       </aside>
 
       <main className="workspace">
