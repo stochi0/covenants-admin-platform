@@ -146,6 +146,11 @@ export async function createRecord(
   }
 
   const payload = await prepareRecordForPersist(table, prepareCreatePayload(table, sanitizeRecord(table, record, "create"), record));
+  const restoredRecord = await restoreDeletedRecordForCreate(table, payload);
+  if (restoredRecord) {
+    return restoredRecord;
+  }
+
   const { data, error } = await supabase
     .from(table.name)
     .insert(payload)
@@ -179,18 +184,7 @@ export async function updateRecord(
 
   const keys = extractPrimaryKeys(table, record);
   const payload = await prepareRecordForPersist(table, sanitizeRecord(table, record, "update"));
-  let query = supabase.from(table.name).update(payload).select("*");
-
-  for (const [column, value] of Object.entries(keys)) {
-    query = query.eq(column, value as never);
-  }
-
-  const { data, error } = await query.single();
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
+  return updateRecordByKeys(table, keys, payload);
 }
 
 export async function deleteRecord(tableName: string, record: RecordInput): Promise<void> {
@@ -237,6 +231,25 @@ export async function deleteRecord(tableName: string, record: RecordInput): Prom
   }
 }
 
+async function updateRecordByKeys(
+  table: TableMeta,
+  keys: RecordInput,
+  payload: RecordInput
+): Promise<Record<string, unknown>> {
+  let query = supabase.from(table.name).update(payload).select("*");
+
+  for (const [column, value] of Object.entries(keys)) {
+    query = query.eq(column, value as never);
+  }
+
+  const { data, error } = await query.single();
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
 export async function importRecords(
   tableName: string,
   rows: RecordInput[]
@@ -261,7 +274,10 @@ export async function importRecords(
 
     if (existingRecord) {
       const mergedRecord = mergeImportedRecord(table, existingRecord, row, payload);
-      await updateRecord(table.name, { ...extractPrimaryKeys(table, existingRecord), ...mergedRecord });
+      if (shouldRestoreDeletedRecord(table, existingRecord)) {
+        mergedRecord.deleted_at = null;
+      }
+      await updateRecordByKeys(table, extractPrimaryKeys(table, existingRecord), mergedRecord);
       updated += 1;
     } else {
       await createRecord(table.name, payload);
@@ -270,6 +286,60 @@ export async function importRecords(
   }
 
   return { processed: created + updated, created, updated };
+}
+
+async function restoreDeletedRecordForCreate(
+  table: TableMeta,
+  payload: RecordInput
+): Promise<Record<string, unknown> | null> {
+  if (!hasDeletedAtColumn(table)) {
+    return null;
+  }
+
+  const existingRecord = await findExistingCreateRecord(table, payload);
+  if (!existingRecord || !shouldRestoreDeletedRecord(table, existingRecord)) {
+    return null;
+  }
+
+  const restorePayload: RecordInput = { ...payload, deleted_at: null };
+  for (const column of table.primaryKeys) {
+    delete restorePayload[column];
+  }
+
+  if (table.columns.some((column) => column.name === "updated_at")) {
+    restorePayload.updated_at = new Date().toISOString();
+  }
+
+  return updateRecordByKeys(table, extractPrimaryKeys(table, existingRecord), restorePayload);
+}
+
+async function findExistingCreateRecord(table: TableMeta, payload: RecordInput): Promise<RecordInput | null> {
+  const matcher = hasPrimaryKeys(table, payload) ? table.primaryKeys : getImportMatcherForRecord(table, payload);
+  if (!matcher) {
+    return null;
+  }
+
+  let query = supabase.from(table.name).select("*").limit(2);
+  for (const column of matcher) {
+    query = query.eq(column, payload[column] as never);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data || data.length === 0) {
+    return null;
+  }
+
+  if (data.length > 1) {
+    throw new Error(
+      `Create matched multiple ${table.label.toLowerCase()} records using ${matcher.join(", ")}. Clean up duplicates before trying again.`
+    );
+  }
+
+  return data[0] as unknown as RecordInput;
 }
 
 async function sanitizeImportRecord(table: TableMeta, record: RecordInput): Promise<RecordInput> {
@@ -623,6 +693,10 @@ function extractPrimaryKeys(table: TableMeta, record: RecordInput): RecordInput 
 
 function hasDeletedAtColumn(table: TableMeta): boolean {
   return table.columns.some((column) => column.name === "deleted_at");
+}
+
+function shouldRestoreDeletedRecord(table: TableMeta, record: RecordInput): boolean {
+  return hasDeletedAtColumn(table) && !isBlankImportValue(record.deleted_at);
 }
 
 function hasPrimaryKeys(table: TableMeta, record: RecordInput): boolean {

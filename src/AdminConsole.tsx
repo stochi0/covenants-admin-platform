@@ -810,8 +810,12 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
         body: JSON.stringify(row)
       });
 
+      const deletedRowKey = createRowKey(selectedTable, row, -1);
+      setRecords((currentRecords) =>
+        currentRecords.filter((currentRow, index) => createRowKey(selectedTable, currentRow, index) !== deletedRowKey)
+      );
+      setTotal((currentTotal) => Math.max(0, currentTotal - 1));
       setNotice(`${selectedTable.label} entry deleted.`);
-      await refreshRecords();
     } catch (apiError) {
       setError(getErrorMessage(apiError));
     } finally {
