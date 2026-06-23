@@ -163,7 +163,13 @@ export const schemaTables: TableMeta[] = [
         sqlType: "public.product_category",
         nullable: true
       }),
-      ...timestamps
+      ...timestamps,
+      column("deleted_at", {
+        kind: "timestamp",
+        sqlType: "timestamp with time zone",
+        nullable: true,
+        hidden: true
+      })
     ]
   },
   {

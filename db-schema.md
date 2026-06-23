@@ -79,6 +79,7 @@ CREATE TABLE public.products (
   category USER-DEFINED,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  deleted_at timestamp with time zone,
   CONSTRAINT products_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.regions (

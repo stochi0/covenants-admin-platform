@@ -22,7 +22,7 @@ export async function listRecords(
   const table = getTableOrThrow(tableName);
   let query = supabase.from(table.name).select("*", { count: "exact" });
 
-  if (table.name === "facilities") {
+  if (hasDeletedAtColumn(table)) {
     query = query.is("deleted_at", null);
   }
 
@@ -200,12 +200,19 @@ export async function deleteRecord(tableName: string, record: RecordInput): Prom
     throw new Error(`${table.label} is read-only.`);
   }
 
-  if (table.name === "facilities") {
-    const keys = extractPrimaryKeys(table, record);
+  const keys = extractPrimaryKeys(table, record);
+
+  if (hasDeletedAtColumn(table)) {
+    const payload: RecordInput = { deleted_at: new Date().toISOString() };
+
+    if (table.columns.some((column) => column.name === "updated_at")) {
+      payload.updated_at = new Date().toISOString();
+    }
+
     let query = supabase
       .from(table.name)
-      .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .select("id");
+      .update(payload)
+      .select(table.primaryKeys.join(","));
 
     for (const [column, value] of Object.entries(keys)) {
       query = query.eq(column, value as never);
@@ -218,7 +225,6 @@ export async function deleteRecord(tableName: string, record: RecordInput): Prom
     return;
   }
 
-  const keys = extractPrimaryKeys(table, record);
   let query = supabase.from(table.name).delete();
 
   for (const [column, value] of Object.entries(keys)) {
@@ -325,6 +331,9 @@ export async function getOptions(
   const columns = [...new Set([primaryKey, displayColumn, ...searchColumns])];
 
   let query = supabase.from(table.name).select(columns.join(",")).limit(options.limit ?? 50);
+  if (hasDeletedAtColumn(table) && ids.length === 0) {
+    query = query.is("deleted_at", null);
+  }
   if (ids.length > 0) {
     query = query.in(primaryKey, ids);
   }
@@ -365,9 +374,13 @@ async function getProductFacilityRelationOptions(
   if (ids.length > 0) {
     query = query.in("id", ids);
   } else if (trimmedSearch) {
-    query = query.ilike("cas_number", `%${escapeForIlike(trimmedSearch)}%`);
+    query = query
+      .is("deleted_at", null)
+      .ilike("cas_number", `%${escapeForIlike(trimmedSearch)}%`);
   } else {
-    query = query.not("cas_number", "is", null);
+    query = query
+      .is("deleted_at", null)
+      .not("cas_number", "is", null);
   }
 
   const { data, error } = await query;
@@ -606,6 +619,10 @@ function extractPrimaryKeys(table: TableMeta, record: RecordInput): RecordInput 
   }
 
   return keys;
+}
+
+function hasDeletedAtColumn(table: TableMeta): boolean {
+  return table.columns.some((column) => column.name === "deleted_at");
 }
 
 function hasPrimaryKeys(table: TableMeta, record: RecordInput): boolean {
