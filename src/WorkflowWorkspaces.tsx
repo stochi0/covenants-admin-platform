@@ -457,6 +457,7 @@ function EnquiryDetail({
             const product = getProductDisplay(item);
             return (
               <button
+                aria-label={`Item ${index + 1}: ${product.title}`}
                 className={item.id === activeItem?.id ? "active" : ""}
                 key={item.id}
                 onClick={() => {
@@ -466,7 +467,7 @@ function EnquiryDetail({
                 title={product.title}
                 type="button"
               >
-                <span>{index + 1}</span><span className="item-tab-label">{product.primary}</span>
+                <span>{index + 1}</span>
               </button>
             );
           })}
