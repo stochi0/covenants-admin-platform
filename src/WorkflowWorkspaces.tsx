@@ -301,7 +301,7 @@ export function DispatchHistoryWorkspace() {
       </header>
       <StatusBanner variant="error">{error ? message(error) : ""}</StatusBanner>
       <section className="panel">
-        <div className="table-scroller">
+        <div className="table-scroller dispatch-table-scroller">
           <table>
             <thead>
               <tr>
@@ -341,6 +341,47 @@ export function DispatchHistoryWorkspace() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="mobile-record-list dispatch-card-list">
+          {isLoading ? (
+            <div className="empty-state">Loading dispatches…</div>
+          ) : records.length ? (
+            records.map((record) => (
+              <article className="mobile-record-card dispatch-card" key={record.id}>
+                <div className="mobile-record-card-head">
+                  <StagePill stage={record.status} />
+                  <span>{formatDateTime(record.created_at)}</span>
+                </div>
+                <div className="mobile-record-fields">
+                  <div className="mobile-record-field">
+                    <span>Vendor</span>
+                    <strong>{record.company_name || "—"}</strong>
+                  </div>
+                  <div className="mobile-record-field">
+                    <span>Product</span>
+                    <strong>{record.product_name || "—"}</strong>
+                  </div>
+                  <div className="mobile-record-field">
+                    <span>Recipients</span>
+                    <strong>{record.recipient_emails?.join(", ") || "—"}</strong>
+                  </div>
+                  <div className="mobile-record-field">
+                    <span>Attempt</span>
+                    <strong>#{record.attempt_number}</strong>
+                  </div>
+                  <div className="mobile-record-field mobile-record-field-wide">
+                    <span>Result</span>
+                    <strong className={record.status === "failed" ? "danger-text" : ""}>
+                      {record.error_message ||
+                        (record.sent_at ? `Sent ${formatDateTime(record.sent_at)}` : "Pending")}
+                    </strong>
+                  </div>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">No dispatches matched the current filter.</div>
+          )}
         </div>
       </section>
     </div>

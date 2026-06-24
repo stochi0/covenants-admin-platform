@@ -66,7 +66,9 @@ export function DataTable({
               records.map((row, index) => (
                 <tr key={createRowKey(table, row, index)}>
                   {columns.map((column) => (
-                    <td key={column.name}>{formatColumnValue(column, row[column.name], lookups)}</td>
+                    <td data-label={column.label} key={column.name}>
+                      {formatColumnValue(column, row[column.name], lookups)}
+                    </td>
                   ))}
                   <td className="actions-cell">
                     <div className="row-actions">
@@ -91,6 +93,41 @@ export function DataTable({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="mobile-record-list">
+        {records.length === 0 ? (
+          <div className="empty-state">No entries matched the current query.</div>
+        ) : (
+          records.map((row, index) => (
+            <article className="mobile-record-card" key={createRowKey(table, row, index)}>
+              <div className="mobile-record-fields">
+                {columns.map((column) => (
+                  <div className="mobile-record-field" key={column.name}>
+                    <span>{column.label}</span>
+                    <strong>{formatColumnValue(column, row[column.name], lookups) || "—"}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="mobile-record-actions">
+                {table.readOnly ? (
+                  <button onClick={() => onEdit(row)} type="button">
+                    View
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => onEdit(row)} type="button">
+                      Edit
+                    </button>
+                    <button className="danger-link" onClick={() => onDelete(row)} type="button">
+                      Delete
+                    </button>
+                  </>
+                )}
+              </div>
+            </article>
+          ))
+        )}
       </div>
 
       <div className="pagination">
