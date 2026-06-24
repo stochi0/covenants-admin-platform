@@ -12,6 +12,7 @@ interface EnquiryListResponse {
 
 interface EnquiryDraftItem {
   productId: string;
+  productCode: string;
   productName: string;
   casNumber: string;
   quantity: string;
@@ -22,6 +23,7 @@ interface EnquiryDraftItem {
 
 const EMPTY_ITEM: EnquiryDraftItem = {
   productId: "",
+  productCode: "",
   productName: "",
   casNumber: "",
   quantity: "",
@@ -440,25 +442,33 @@ function EnquiryDetail({
       </div>
 
       <div className="item-tabs">
-        {detail.items?.map((item: RecordValue, index: number) => (
-          <button
-            className={item.id === activeItem?.id ? "active" : ""}
-            key={item.id}
-            onClick={() => {
-              setActiveItemId(item.id);
-              setAcknowledged(false);
-            }}
-            type="button"
-          >
-            <span>{index + 1}</span>{item.product_name || item.cas_number}
-          </button>
-        ))}
+        {detail.items?.map((item: RecordValue, index: number) => {
+          const product = getProductDisplay(item);
+          return (
+            <button
+              className={item.id === activeItem?.id ? "active" : ""}
+              key={item.id}
+              onClick={() => {
+                setActiveItemId(item.id);
+                setAcknowledged(false);
+              }}
+              title={product.title}
+              type="button"
+            >
+              <span>{index + 1}</span><span className="item-tab-label">{product.primary}</span>
+            </button>
+          );
+        })}
       </div>
 
       {activeItem ? (
         <>
           <section className="item-summary">
-            <div><span>Product</span><strong>{activeItem.product_name || "Unmatched material"}</strong></div>
+            <div className="item-product-summary">
+              <span>Product</span>
+              <strong>{getProductDisplay(activeItem).primary}</strong>
+              {getProductDisplay(activeItem).secondary ? <small>{getProductDisplay(activeItem).secondary}</small> : null}
+            </div>
             <div><span>CAS</span><strong>{activeItem.cas_number || "—"}</strong></div>
             <div><span>Quantity</span><strong>{activeItem.quantities?.map((q: RecordValue) => `${q.quantity} ${q.unit}`).join(", ") || "—"}</strong></div>
           </section>
@@ -610,7 +620,7 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
   }
 
   async function searchProduct(index: number, value: string) {
-    updateItem(index, { productName: value, productId: "" });
+    updateItem(index, { productName: value, productId: "", productCode: "" });
     if (value.trim().length < 2) return setResults((current) => ({ ...current, [index]: [] }));
     try {
       const data = await workflowApi<{ records: RecordValue[] }>(`/api/enquiry-products?search=${encodeURIComponent(value)}`);
@@ -733,8 +743,40 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                         <div className="draft-product-field">
                           <Field label="Product or material">
                             <div className="product-autocomplete">
-                              <input required={!item.casNumber} value={item.productName} onChange={(e) => void searchProduct(index, e.target.value)} placeholder="Search product catalog…" />
-                              {results[index]?.length ? <div className="autocomplete-results">{results[index].map((product) => <button key={product.id} onClick={() => { updateItem(index, { productId: product.id, productName: product.product_name, casNumber: product.cas_number || "" }); setResults((current) => ({ ...current, [index]: [] })); }} type="button"><strong>{product.product_name}</strong><span>{product.cas_number || "No CAS"}{product.is_controlled ? " · Controlled" : ""}</span></button>)}</div> : null}
+                              <input
+                                required={!item.casNumber}
+                                title={item.productName}
+                                value={item.productName}
+                                onChange={(e) => void searchProduct(index, e.target.value)}
+                                placeholder="Search by product name, code or CAS…"
+                              />
+                              {item.productId ? <span className="selected-product-code">Product code: {item.productCode || item.productId}</span> : null}
+                              {results[index]?.length ? (
+                                <div className="autocomplete-results">
+                                  {results[index].map((product) => (
+                                    <button
+                                      key={product.id}
+                                      onClick={() => {
+                                        updateItem(index, {
+                                          productId: product.id,
+                                          productCode: product.product_code || product.id,
+                                          productName: product.product_name || `Product code: ${product.product_code || product.id}`,
+                                          casNumber: product.cas_number || ""
+                                        });
+                                        setResults((current) => ({ ...current, [index]: [] }));
+                                      }}
+                                      type="button"
+                                    >
+                                      <strong>{product.product_name || `Product code: ${product.product_code || product.id}`}</strong>
+                                      <span>
+                                        Code: {product.product_code || product.id}
+                                        {product.cas_number ? ` · CAS: ${product.cas_number}` : ""}
+                                        {product.is_controlled ? " · Controlled" : ""}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
                             </div>
                           </Field>
                         </div>
