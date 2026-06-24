@@ -1,20 +1,12 @@
 import { Show, SignOutButton, useAuth, useUser } from "@clerk/react";
 import { LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
-import { Component, useEffect, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
-import AdminConsole from "./AdminConsole";
+import type { AdminMeResponse } from "../shared/types";
 import SignInDialog from "./SignInDialog";
+import { apiRequest, setApiTokenGetter } from "./lib/api";
 
-interface AdminMeResponse {
-  user: {
-    id: string;
-    email: string | null;
-    firstName: string | null;
-    lastName: string | null;
-    imageUrl: string | null;
-    role: "admin";
-  };
-}
+const AdminConsole = lazy(() => import("./AdminConsole"));
 
 export default function App() {
   return (
@@ -41,6 +33,7 @@ function AdminGate() {
   const [adminUser, setAdminUser] = useState<AdminMeResponse["user"] | null>(null);
   const [status, setStatus] = useState<"loading" | "authorized" | "forbidden" | "error">("loading");
   const [message, setMessage] = useState("");
+  const bootstrapUserId = useRef<string | null>(null);
   const userId = user?.id;
   const userEmail = user?.primaryEmailAddress?.emailAddress;
   const userFirstName = user?.firstName;
@@ -49,26 +42,29 @@ function AdminGate() {
   const userEmailVerified = user?.primaryEmailAddress?.verification?.status === "verified";
 
   useEffect(() => {
-    if (!isLoaded || !isUserLoaded || !user) {
+    setApiTokenGetter(getToken);
+    return () => setApiTokenGetter(null);
+  }, [getToken]);
+
+  useEffect(() => {
+    if (!isLoaded || !isUserLoaded || !userId) {
+      return;
+    }
+    if (bootstrapUserId.current === userId && status !== "error" && status !== "forbidden") {
       return;
     }
 
     let cancelled = false;
+    bootstrapUserId.current = userId ?? null;
 
     async function loadAdminAccess() {
       try {
         setStatus((current) => (current === "authorized" ? current : "loading"));
         setMessage("");
 
-        const token = await getToken();
-        if (!token) {
-          throw new Error("You must be signed in to continue.");
-        }
-
-        const syncResponse = await fetch("/api/users/sync", {
+        const data = await apiRequest<AdminMeResponse & { id: string }>("/api/users/sync", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
@@ -79,40 +75,17 @@ function AdminGate() {
             emailVerified: userEmailVerified
           })
         });
-        const syncData = (await syncResponse.json().catch(() => null)) as
-          | { error?: string; details?: string }
-          | null;
-
-        if (!syncResponse.ok) {
-          throw new Error(syncData?.error ?? "Unable to prepare your account.");
-        }
-
-        const response = await fetch("/api/auth/me", {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        const data = (await response.json().catch(() => null)) as
-          | (AdminMeResponse & { error?: string; details?: string })
-          | null;
-
-        if (!response.ok) {
-          const errorMessage = data?.error ?? "Unable to verify admin access.";
-          if (!cancelled) {
-            setStatus(response.status === 403 ? "forbidden" : "error");
-            setMessage(errorMessage);
-          }
-          return;
-        }
 
         if (!cancelled) {
-          setAdminUser(data?.user ?? null);
+          setAdminUser(data.user);
           setStatus("authorized");
         }
       } catch (error) {
         if (!cancelled) {
-          setStatus("error");
-          setMessage(error instanceof Error ? error.message : "Unable to verify admin access.");
+          const message = error instanceof Error ? error.message : "Unable to verify admin access.";
+          setStatus(message === "Admin access is required." ? "forbidden" : "error");
+          setMessage(message);
+          bootstrapUserId.current = null;
         }
       }
     }
@@ -131,7 +104,8 @@ function AdminGate() {
     userFirstName,
     userLastName,
     userImageUrl,
-    userEmailVerified
+    userEmailVerified,
+    status
   ]);
 
   if (!isLoaded || !isUserLoaded || status === "loading") {
@@ -183,15 +157,14 @@ function AdminGate() {
 
   return (
     <AdminConsoleErrorBoundary>
-      <AdminConsole adminUser={adminUser} onAdminUserChange={setAdminUser} />
+      <Suspense fallback={<div className="shell loading-screen">Loading admin console...</div>}>
+        <AdminConsole adminUser={adminUser} onAdminUserChange={setAdminUser} />
+      </Suspense>
     </AdminConsoleErrorBoundary>
   );
 }
 
-class AdminConsoleErrorBoundary extends Component<
-  { children: ReactNode },
-  { hasError: boolean }
-> {
+class AdminConsoleErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
 
   static getDerivedStateFromError() {

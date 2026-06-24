@@ -44,6 +44,8 @@ export interface AuthenticatedAdminRequest extends Request {
 type HeaderMap = Headers | Record<string, string | string[] | undefined>;
 
 let jwksCache: { issuer: string; keys: Jwk[]; expiresAt: number } | null = null;
+const ADMIN_CACHE_TTL_MS = 30_000;
+const adminUserCache = new Map<string, { user: AdminUser; expiresAt: number }>();
 
 function base64UrlDecode(value: string): Buffer {
   return Buffer.from(value.replace(/-/g, "+").replace(/_/g, "/"), "base64");
@@ -169,10 +171,20 @@ export async function verifyClerkHeaders(headers: HeaderMap): Promise<ClerkSessi
 
 export async function authenticateAdmin(headers: HeaderMap): Promise<AdminUser> {
   const claims = await verifyClerkHeaders(headers);
+  const clerkUserId = claims.sub;
+  if (!clerkUserId) {
+    throw new Error("Session token is missing a user id.");
+  }
+
+  const cached = adminUserCache.get(clerkUserId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.user;
+  }
+
   const { data, error } = await supabase
     .from("users")
     .select("id, clerk_user_id, email, first_name, last_name, image_url, role")
-    .eq("clerk_user_id", claims.sub)
+    .eq("clerk_user_id", clerkUserId)
     .is("deleted_at", null)
     .maybeSingle();
 
@@ -185,7 +197,7 @@ export async function authenticateAdmin(headers: HeaderMap): Promise<AdminUser> 
     throw accessError;
   }
 
-  return {
+  const adminUser: AdminUser = {
     id: String(data.id),
     clerkUserId: String(data.clerk_user_id),
     email: typeof data.email === "string" ? data.email : null,
@@ -194,6 +206,12 @@ export async function authenticateAdmin(headers: HeaderMap): Promise<AdminUser> 
     imageUrl: typeof data.image_url === "string" ? data.image_url : null,
     role: "admin"
   };
+  adminUserCache.set(clerkUserId, { user: adminUser, expiresAt: Date.now() + ADMIN_CACHE_TTL_MS });
+  return adminUser;
+}
+
+export function clearAdminCache(clerkUserId: string) {
+  adminUserCache.delete(clerkUserId);
 }
 
 export async function requireAdmin(req: AuthenticatedAdminRequest, res: Response, next: NextFunction) {

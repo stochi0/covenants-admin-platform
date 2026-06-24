@@ -1,5 +1,6 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { lazy, startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import {
   Award,
   Beaker,
@@ -17,6 +18,7 @@ import {
   UserRound
 } from "lucide-react";
 import type {
+  AdminUser,
   ColumnMeta,
   FacilityRelationsResponse,
   FacilityRelationsUpsertRequest,
@@ -24,11 +26,24 @@ import type {
   OptionRecord,
   OptionsResponse,
   RecordsResponse,
-  SchemaResponse,
   TableMeta
 } from "../shared/types";
-import { DispatchHistoryWorkspace, EnquiriesWorkspace, OverviewWorkspace } from "./WorkflowWorkspaces";
-import ProfileWorkspace from "./ProfileWorkspace";
+import { apiRequest as api } from "./lib/api";
+import { toDateTimeLocalValue } from "./lib/dates";
+import { getErrorMessage } from "./lib/errors";
+import { NavigationGroup } from "./app/AdminShell";
+import { DataTable } from "./components/DataTable";
+import { StatusBanner } from "./components/StatusBanner";
+import {
+  adminCrudQueryKeys,
+  useRecordsQuery,
+  useSchemaQuery
+} from "./features/admin-crud/hooks";
+
+const OverviewWorkspace = lazy(() => import("./features/workflow/OverviewWorkspace"));
+const EnquiriesWorkspace = lazy(() => import("./features/workflow/EnquiriesWorkspace"));
+const DispatchHistoryWorkspace = lazy(() => import("./features/workflow/DispatchHistoryWorkspace"));
+const ProfileWorkspace = lazy(() => import("./ProfileWorkspace"));
 
 type RowRecord = Record<string, unknown>;
 type FormState = Record<string, string>;
@@ -54,6 +69,8 @@ interface ImportEditorState {
 }
 
 const PAGE_SIZE = 25;
+const EXPORT_PAGE_SIZE = 100;
+const IMPORT_PREVIEW_LIMIT = 50;
 
 const RELATION_OPTION_LIMIT = 12;
 
@@ -78,29 +95,18 @@ const EMPTY_RELATION_OPTIONS: Record<RelationSearchKey, OptionsResponse["options
 };
 
 interface AdminConsoleProps {
-  adminUser?: {
-    id: string;
-    email: string | null;
-    firstName: string | null;
-    lastName: string | null;
-    imageUrl: string | null;
-    role: "admin";
-  } | null;
-  onAdminUserChange: (user: NonNullable<AdminConsoleProps["adminUser"]>) => void;
+  adminUser?: AdminUser | null;
+  onAdminUserChange: (user: AdminUser) => void;
 }
 
 export default function AdminConsole({ adminUser, onAdminUserChange }: AdminConsoleProps) {
-  const [tables, setTables] = useState<TableMeta[]>([]);
+  const queryClient = useQueryClient();
   const [selectedTableName, setSelectedTableName] = useState<string>("");
   const [activeView, setActiveView] = useState(() => readWorkspaceHash());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [records, setRecords] = useState<RowRecord[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [loadingSchema, setLoadingSchema] = useState(true);
-  const [loadingRecords, setLoadingRecords] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -111,8 +117,9 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
   const [importState, setImportState] = useState<ImportState | null>(null);
   const [importEditor, setImportEditor] = useState<ImportEditorState | null>(null);
   const [lookups, setLookups] = useState<LookupCache>({});
-  const [facilityRelations, setFacilityRelations] = useState<FacilityRelationsResponse | null>(null);
-  const [facilityRelationsDraft, setFacilityRelationsDraft] = useState<FacilityRelationsUpsertRequest | null>(null);
+  const [facilityRelationsDraft, setFacilityRelationsDraft] = useState<FacilityRelationsUpsertRequest | null>(
+    null
+  );
   const [facilityRelationsLoading, setFacilityRelationsLoading] = useState(false);
   const [facilityRelationSearch, setFacilityRelationSearch] = useState<Record<RelationSearchKey, string>>({
     chemistries: "",
@@ -121,20 +128,32 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
   });
   const [facilityRelationOptions, setFacilityRelationOptions] =
     useState<Record<RelationSearchKey, OptionsResponse["options"]>>(EMPTY_RELATION_OPTIONS);
-  const [facilityRelationOptionsLoading, setFacilityRelationOptionsLoading] =
-    useState<Record<RelationSearchKey, boolean>>({
-      chemistries: false,
-      products: false,
-      accreditations: false
-    });
+  const [facilityRelationOptionsLoading, setFacilityRelationOptionsLoading] = useState<
+    Record<RelationSearchKey, boolean>
+  >({
+    chemistries: false,
+    products: false,
+    accreditations: false
+  });
   const [activeFacilityRelationTab, setActiveFacilityRelationTab] =
     useState<RelationSearchKey>("chemistries");
   const [quickCreatingRelation, setQuickCreatingRelation] = useState<RelationSearchKey | null>(null);
+  const isTableView = activeView.startsWith("table:");
+  const schemaQuery = useSchemaQuery();
+  const tables = useMemo(() => schemaQuery.data?.tables ?? [], [schemaQuery.data?.tables]);
 
   const selectedTable = useMemo(
     () => tables.find((table) => table.name === selectedTableName) ?? null,
     [selectedTableName, tables]
   );
+  const recordsQuery = useRecordsQuery(selectedTable?.name ?? "", page, PAGE_SIZE, appliedSearch, isTableView);
+  const activeRecordsQueryKey = selectedTable
+    ? adminCrudQueryKeys.records(selectedTable.name, page, PAGE_SIZE, appliedSearch)
+    : null;
+  const records = useMemo(() => recordsQuery.data?.records ?? [], [recordsQuery.data?.records]);
+  const total = recordsQuery.data?.total ?? 0;
+  const loadingSchema = schemaQuery.isLoading;
+  const loadingRecords = recordsQuery.isLoading || (recordsQuery.isFetching && !recordsQuery.data);
 
   function createEmptyFacilityRelationsDraft(): FacilityRelationsUpsertRequest {
     return {
@@ -177,6 +196,40 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     return options.find((option) => option.value === id) ?? null;
   }
 
+  const fetchOptions = useCallback(
+    (
+      tableName: string,
+      {
+        ids = "",
+        limit = 50,
+        search = "",
+        signal,
+        variant = ""
+      }: { ids?: string; limit?: number; search?: string; signal?: AbortSignal; variant?: string } = {}
+    ) =>
+      queryClient.fetchQuery({
+        queryKey: adminCrudQueryKeys.options(tableName, search, variant, ids, limit),
+        queryFn: ({ signal: querySignal }) => {
+          const params = new URLSearchParams({ limit: String(limit) });
+          if (ids) params.set("ids", ids);
+          if (search) params.set("search", search);
+          if (variant) params.set("variant", variant);
+          return api<OptionsResponse>(`/api/options/${tableName}?${params.toString()}`, {
+            signal: signal ?? querySignal
+          });
+        },
+        staleTime: 30_000
+      }),
+    [queryClient]
+  );
+
+  const mergeLookupOptions = useCallback((tableName: string, options: OptionsResponse["options"]) => {
+    setLookups((current) => ({
+      ...current,
+      [tableName]: mergeOptions(current[tableName] ?? [], options)
+    }));
+  }, []);
+
   async function loadRelationOptionsByIds(key: RelationSearchKey, ids: string[]) {
     const missingIds = [...new Set(ids.filter((id) => id && !getRelationOption(key, id)))];
     if (missingIds.length === 0) {
@@ -184,50 +237,44 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     }
 
     const tableName = RELATION_TABLE_BY_KEY[key];
-    const params = new URLSearchParams({
+    const data = await fetchOptions(tableName, {
       ids: missingIds.join(","),
-      limit: String(missingIds.length)
+      limit: missingIds.length,
+      variant: key === "products" ? "facility_relation" : ""
     });
-    if (key === "products") {
-      params.set("variant", "facility_relation");
-    }
-
-    const data = await api<OptionsResponse>(`/api/options/${tableName}?${params.toString()}`);
-    setLookups((current) => ({
-      ...current,
-      [tableName]: mergeOptions(current[tableName] ?? [], data.options)
-    }));
+    mergeLookupOptions(tableName, data.options);
   }
 
-  async function loadRelationOptions(key: RelationSearchKey, search = "", signal?: AbortSignal) {
+  const loadRelationOptions = useCallback(async (key: RelationSearchKey, search = "", signal?: AbortSignal) => {
     setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: true }));
 
     const tableName = RELATION_TABLE_BY_KEY[key];
-    const params = new URLSearchParams({
-      limit: String(RELATION_OPTION_LIMIT)
-    });
-    if (key === "products") {
-      params.set("variant", "facility_relation");
-    }
     const query = search.trim();
-    if (query) {
-      params.set("search", query);
+    if (key === "products" && query.length < 2) {
+      setFacilityRelationOptions((current) => ({
+        ...current,
+        [key]: []
+      }));
+      setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
+      return [];
     }
 
-    const data = await api<OptionsResponse>(`/api/options/${tableName}?${params.toString()}`, { signal });
+    const data = await fetchOptions(tableName, {
+      limit: RELATION_OPTION_LIMIT,
+      search: query,
+      signal,
+      variant: key === "products" ? "facility_relation" : ""
+    });
 
     setFacilityRelationOptions((current) => ({
       ...current,
       [key]: data.options
     }));
-    setLookups((current) => ({
-      ...current,
-      [tableName]: mergeOptions(current[tableName] ?? [], data.options)
-    }));
+    mergeLookupOptions(tableName, data.options);
     setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
 
     return data.options;
-  }
+  }, [fetchOptions, mergeLookupOptions]);
 
   async function quickCreateRelationOption(
     key: RelationSearchKey,
@@ -254,7 +301,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         throw new Error(`Created ${RELATION_LABEL_BY_KEY[key].toLowerCase()} record did not return an id.`);
       }
 
-      await loadRelationOptions(key, key === "products" ? values.casNumber ?? name : name);
+      await loadRelationOptions(key, key === "products" ? (values.casNumber ?? name) : name);
       if (key === "chemistries") {
         addChemistryRelation(createdId);
       }
@@ -264,7 +311,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       if (key === "accreditations") {
         addAccreditationRelation(createdId);
       }
-      setNotice(`Created and linked ${key === "products" ? values.casNumber ?? name : name}.`);
+      setNotice(`Created and linked ${key === "products" ? (values.casNumber ?? name) : name}.`);
     } catch (apiError) {
       setError(getErrorMessage(apiError));
     } finally {
@@ -280,7 +327,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     updateFacilityRelationsDraft((current) => ({
       ...current,
       chemistries: (current.chemistries ?? []).some((entry) => entry.chemistryId === chemistryId)
-        ? current.chemistries ?? []
+        ? (current.chemistries ?? [])
         : [...(current.chemistries ?? []), { chemistryId }]
     }));
     setFacilityRelationSearchValue("chemistries", "");
@@ -294,7 +341,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     updateFacilityRelationsDraft((current) => ({
       ...current,
       products: (current.products ?? []).some((entry) => entry.productId === productId)
-        ? current.products ?? []
+        ? (current.products ?? [])
         : [...(current.products ?? []), { productId, isPrimary: false }]
     }));
     setFacilityRelationSearchValue("products", "");
@@ -307,8 +354,10 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
 
     updateFacilityRelationsDraft((current) => ({
       ...current,
-      accreditations: (current.accreditations ?? []).some((entry) => entry.accreditationId === accreditationId)
-        ? current.accreditations ?? []
+      accreditations: (current.accreditations ?? []).some(
+        (entry) => entry.accreditationId === accreditationId
+      )
+        ? (current.accreditations ?? [])
         : [
             ...(current.accreditations ?? []),
             {
@@ -331,50 +380,41 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
   }, [selectedTable]);
 
   useEffect(() => {
-    void loadSchema();
-  }, []);
-
-  useEffect(() => {
     const handleHashChange = () => setActiveView(readWorkspaceHash());
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
   useEffect(() => {
-    if (!selectedTable) {
+    if (!schemaQuery.data?.tables.length) {
       return;
     }
 
-    const controller = new AbortController();
-    setLoadingRecords(true);
-    setError("");
-
-    void api<RecordsResponse>(
-      `/api/records/${selectedTable.name}?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}&search=${encodeURIComponent(
-        appliedSearch
-      )}`,
-      { signal: controller.signal }
-    )
-      .then((data) => {
-        setRecords(data.records);
-        setTotal(data.total);
-      })
-      .catch((apiError: unknown) => {
-        if (!controller.signal.aborted) {
-          setError(getErrorMessage(apiError));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setLoadingRecords(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [appliedSearch, page, selectedTable]);
+    const currentView = readWorkspaceHash();
+    const requestedTable = currentView.startsWith("table:") ? currentView.slice("table:".length) : "";
+    if (requestedTable && !selectedTableName) {
+      setSelectedTableName(
+        schemaQuery.data.tables.some((table) => table.name === requestedTable)
+          ? requestedTable
+          : schemaQuery.data.tables[0]?.name ?? ""
+      );
+    }
+  }, [schemaQuery.data?.tables, selectedTableName]);
 
   useEffect(() => {
-    if (!selectedTable || foreignTableNames.length === 0) {
+    if (schemaQuery.error) {
+      setError(getErrorMessage(schemaQuery.error));
+    }
+  }, [schemaQuery.error]);
+
+  useEffect(() => {
+    if (recordsQuery.error) {
+      setError(getErrorMessage(recordsQuery.error));
+    }
+  }, [recordsQuery.error]);
+
+  useEffect(() => {
+    if (!isTableView || !selectedTable || foreignTableNames.length === 0) {
       return;
     }
 
@@ -383,15 +423,41 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         continue;
       }
 
-      void api<OptionsResponse>(`/api/options/${foreignTable}`)
+      void fetchOptions(foreignTable)
         .then((data) => {
           setLookups((current) => ({ ...current, [foreignTable]: data.options }));
         })
         .catch((apiError: unknown) => {
           setError(getErrorMessage(apiError));
-      });
+        });
     }
-  }, [foreignTableNames, lookups, selectedTable]);
+  }, [fetchOptions, foreignTableNames, isTableView, lookups, selectedTable]);
+
+  useEffect(() => {
+    if (!isTableView || !selectedTable || records.length === 0) {
+      return;
+    }
+
+    const foreignColumns = selectedTable.columns.filter((column) => column.foreignKey);
+    for (const foreignTable of foreignTableNames) {
+      const ids = [
+        ...new Set(
+          foreignColumns
+            .filter((column) => column.foreignKey?.referencesTable === foreignTable)
+            .flatMap((column) => records.map((record) => String(record[column.name] ?? "")))
+            .filter(Boolean)
+        )
+      ].filter((id) => !(lookups[foreignTable] ?? []).some((option) => option.value === id));
+
+      if (ids.length === 0) {
+        continue;
+      }
+
+      void fetchOptions(foreignTable, { ids: ids.join(","), limit: ids.length })
+        .then((data) => mergeLookupOptions(foreignTable, data.options))
+        .catch((apiError: unknown) => setError(getErrorMessage(apiError)));
+    }
+  }, [fetchOptions, foreignTableNames, isTableView, lookups, mergeLookupOptions, records, selectedTable]);
 
   useEffect(() => {
     if (selectedTable?.name !== "facilities" || !editor) {
@@ -399,18 +465,23 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     }
 
     const controller = new AbortController();
-
-    for (const key of RELATION_KEYS) {
-      void loadRelationOptions(key, facilityRelationSearch[key], controller.signal).catch((apiError: unknown) => {
-        if (!controller.signal.aborted) {
-          setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
-          setError(getErrorMessage(apiError));
+    const key = activeFacilityRelationTab;
+    const timer = window.setTimeout(() => {
+      void loadRelationOptions(key, facilityRelationSearch[key], controller.signal).catch(
+        (apiError: unknown) => {
+          if (!controller.signal.aborted) {
+            setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
+            setError(getErrorMessage(apiError));
+          }
         }
-      });
-    }
+      );
+    }, 220);
 
-    return () => controller.abort();
-  }, [editor, facilityRelationSearch, selectedTable?.name]);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeFacilityRelationTab, editor, facilityRelationSearch, loadRelationOptions, selectedTable?.name]);
 
   const visibleColumns = useMemo(() => {
     if (!selectedTable) {
@@ -445,7 +516,9 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       };
     }
 
-    const autoManagedColumns = selectedTable.columns.filter((column) => column.autoGenerated || column.readOnly);
+    const autoManagedColumns = selectedTable.columns.filter(
+      (column) => column.autoGenerated || column.readOnly
+    );
     const ignoredColumns = selectedTable.columns.filter(
       (column) => column.autoGenerated || column.hidden || column.readOnly
     );
@@ -488,21 +561,36 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
 
     return Object.keys(importState.rows[0]).filter((column) => !hiddenHeaders.has(column));
   }, [importState?.rows, selectedTable]);
+  const previewRows = useMemo(
+    () => importState?.rows.slice(0, IMPORT_PREVIEW_LIMIT) ?? [],
+    [importState?.rows]
+  );
   const activeImportMatcher = useMemo(
-    () => importMatchers.find((matcher) => matcher.every((column) => previewColumns.includes(column))) ?? null,
+    () =>
+      importMatchers.find((matcher) => matcher.every((column) => previewColumns.includes(column))) ?? null,
     [importMatchers, previewColumns]
   );
   const importMatcherSummary = useMemo(
     () =>
       importMatchers.map((matcher) =>
         matcher
-          .map((columnName) => getImportHeaderName(selectedTable?.columns.find((column) => column.name === columnName) ?? columnName))
+          .map((columnName) =>
+            getImportHeaderName(
+              selectedTable?.columns.find((column) => column.name === columnName) ?? columnName
+            )
+          )
           .join(" + ")
       ),
     [importMatchers, selectedTable]
   );
   const importMismatchMessage = useMemo(() => {
-    if (!selectedTable || !importState || importState.rows.length === 0 || importMatchers.length === 0 || activeImportMatcher) {
+    if (
+      !selectedTable ||
+      !importState ||
+      importState.rows.length === 0 ||
+      importMatchers.length === 0 ||
+      activeImportMatcher
+    ) {
       return "";
     }
 
@@ -510,26 +598,6 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       " or "
     )} so imports update existing entries instead of creating duplicates.`;
   }, [activeImportMatcher, importMatcherSummary, importMatchers.length, importState, selectedTable]);
-
-  async function loadSchema() {
-    try {
-      setLoadingSchema(true);
-      const data = await api<SchemaResponse>("/api/schema");
-      setTables(data.tables);
-      if (data.tables.length > 0) {
-        const requestedTable = readWorkspaceHash().startsWith("table:")
-          ? readWorkspaceHash().slice("table:".length)
-          : "";
-        setSelectedTableName(
-          data.tables.some((table) => table.name === requestedTable) ? requestedTable : data.tables[0].name
-        );
-      }
-    } catch (apiError) {
-      setError(getErrorMessage(apiError));
-    } finally {
-      setLoadingSchema(false);
-    }
-  }
 
   function handleSearchSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -548,11 +616,8 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     setEditor({ mode: "create", row: null });
     setFormState(createEmptyForm(selectedTable));
     if (selectedTable.name === "facilities") {
-      setFacilityRelations(null);
       setFacilityRelationsDraft(createEmptyFacilityRelationsDraft());
-      void ensureFacilityRelationOptions();
     } else {
-      setFacilityRelations(null);
       setFacilityRelationsDraft(null);
     }
   }
@@ -574,7 +639,6 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         void loadFacilityRelations(facilityId);
       }
     } else {
-      setFacilityRelations(null);
       setFacilityRelationsDraft(null);
     }
   }
@@ -584,7 +648,6 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     setImportState(null);
     setImportEditor(null);
     setFormState({});
-    setFacilityRelations(null);
     setFacilityRelationsDraft(null);
     setFacilityRelationSearch({ chemistries: "", products: "", accreditations: "" });
     setActiveFacilityRelationTab("chemistries");
@@ -593,7 +656,9 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
   function selectNavigationView(id: string) {
     const tableName = id.startsWith("table:") ? id.slice("table:".length) : "";
     if (!tables.some((table) => table.name === tableName)) {
-      setError(`The ${tableName.replaceAll("_", " ")} workspace is not available until its Supabase migration is applied.`);
+      setError(
+        `The ${tableName.replaceAll("_", " ")} workspace is not available until its Supabase migration is applied.`
+      );
       return;
     }
 
@@ -753,20 +818,41 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         String(savedRow.id ?? editor.row?.id ?? "")
       ) {
         const facilityId = String(savedRow.id ?? editor.row?.id ?? "");
-        await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`, {
+        const relations = await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(facilityRelationsDraft)
         });
+        queryClient.setQueryData(adminCrudQueryKeys.facilityRelations(facilityId), relations);
       }
 
+      if (activeRecordsQueryKey) {
+        queryClient.setQueryData<RecordsResponse>(activeRecordsQueryKey, (current) => {
+          if (!current) return current;
+          const savedKey = createRowKey(selectedTable, savedRow, -1);
+          const existingIndex = current.records.findIndex(
+            (row, index) => createRowKey(selectedTable, row, index) === savedKey
+          );
+          if (existingIndex >= 0) {
+            return {
+              ...current,
+              records: current.records.map((row, index) => (index === existingIndex ? savedRow : row))
+            };
+          }
+          return {
+            ...current,
+            records: page === 0 ? [savedRow, ...current.records].slice(0, PAGE_SIZE) : current.records,
+            total: current.total + (editor.mode === "create" ? 1 : 0)
+          };
+        });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["admin-crud", "options", selectedTable.name] });
       setNotice(
         editor.mode === "create"
           ? `${selectedTable.label} entry created.`
           : `${selectedTable.label} entry updated.`
       );
       closePanels();
-      await refreshRecords();
     } catch (apiError) {
       setError(getErrorMessage(apiError));
     } finally {
@@ -779,11 +865,12 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       setFacilityRelationsLoading(true);
       setError("");
 
-      await ensureFacilityRelationOptions();
-
-      const data = await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`);
+      const data = await queryClient.fetchQuery({
+        queryKey: adminCrudQueryKeys.facilityRelations(facilityId),
+        queryFn: () => api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`),
+        staleTime: 30_000
+      });
       await hydrateFacilityRelationLabels(data);
-      setFacilityRelations(data);
       setFacilityRelationsDraft({
         chemistries: data.chemistries.map((row) => ({
           chemistryId: row.chemistryId
@@ -824,16 +911,6 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     ]);
   }
 
-  async function ensureFacilityRelationOptions() {
-    await Promise.all(
-      RELATION_KEYS
-        .filter((key) => !lookups[RELATION_TABLE_BY_KEY[key]])
-        .map(async (key) => {
-          await loadRelationOptions(key);
-        })
-    );
-  }
-
   async function handleDeleteRecord(row: RowRecord) {
     if (!selectedTable) {
       return;
@@ -855,10 +932,20 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       });
 
       const deletedRowKey = createRowKey(selectedTable, row, -1);
-      setRecords((currentRecords) =>
-        currentRecords.filter((currentRow, index) => createRowKey(selectedTable, currentRow, index) !== deletedRowKey)
-      );
-      setTotal((currentTotal) => Math.max(0, currentTotal - 1));
+      if (activeRecordsQueryKey) {
+        queryClient.setQueryData<RecordsResponse>(activeRecordsQueryKey, (current) =>
+          current
+            ? {
+                ...current,
+                records: current.records.filter(
+                  (currentRow, index) => createRowKey(selectedTable, currentRow, index) !== deletedRowKey
+                ),
+                total: Math.max(0, current.total - 1)
+              }
+            : current
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ["admin-crud", "options", selectedTable.name] });
       setNotice(`${selectedTable.label} entry deleted.`);
     } catch (apiError) {
       setError(getErrorMessage(apiError));
@@ -872,13 +959,9 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       return;
     }
 
-    const data = await api<RecordsResponse>(
-      `/api/records/${selectedTable.name}?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}&search=${encodeURIComponent(
-        appliedSearch
-      )}`
-    );
-    setRecords(data.records);
-    setTotal(data.total);
+    await queryClient.invalidateQueries({
+      queryKey: ["admin-crud", "records", selectedTable.name]
+    });
   }
 
   async function handleRefreshClick() {
@@ -918,7 +1001,11 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       const XLSX = await import("xlsx");
       const worksheet = XLSX.utils.json_to_sheet(worksheetRows);
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, selectedTable.label.slice(0, 31) || selectedTable.name);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        selectedTable.label.slice(0, 31) || selectedTable.name
+      );
       XLSX.writeFile(workbook, createExportFilename(selectedTable.name));
       setNotice(`Exported ${rows.length} ${selectedTable.label.toLowerCase()} entries to Excel.`);
     } catch (exportError) {
@@ -951,7 +1038,10 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         `Imported ${response.processed} entries into ${selectedTable.label} (${response.created} created, ${response.updated} updated).`
       );
       closePanels();
-      await refreshRecords();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-crud", "records", selectedTable.name] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-crud", "options", selectedTable.name] })
+      ]);
     } catch (apiError) {
       setError(getErrorMessage(apiError));
     } finally {
@@ -1003,12 +1093,12 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     return <div className="shell loading-screen">Loading admin tools...</div>;
   }
 
-  if (!selectedTable) {
+  if (isTableView && !selectedTable) {
     return <div className="shell loading-screen">No admin tools are configured.</div>;
   }
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const isFacilityEditor = selectedTable.name === "facilities" && Boolean(editor);
+  const isFacilityEditor = selectedTable?.name === "facilities" && Boolean(editor);
 
   return (
     <div className={sidebarCollapsed ? "shell sidebar-collapsed" : "shell"}>
@@ -1072,7 +1162,11 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
             collapsed={sidebarCollapsed}
             label="Governance"
             items={[
-              { id: "table:controlled_substances", label: "Controlled Substances", icon: <ShieldAlert size={18} /> },
+              {
+                id: "table:controlled_substances",
+                label: "Controlled Substances",
+                icon: <ShieldAlert size={18} />
+              },
               { id: "table:accreditations", label: "Accreditations", icon: <Award size={18} /> },
               { id: "table:regions", label: "Regions", icon: <MapPinned size={18} /> },
               { id: "table:products_dedupe_audit", label: "Dedupe Audit", icon: <Beaker size={18} /> }
@@ -1097,194 +1191,137 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         ) : activeView === "dispatches" ? (
           <DispatchHistoryWorkspace />
         ) : activeView === "profile" ? (
-          <ProfileWorkspace
-            adminUser={adminUser}
-            onAdminUserChange={onAdminUserChange}
-          />
-        ) : (
+          <ProfileWorkspace adminUser={adminUser} onAdminUserChange={onAdminUserChange} />
+        ) : selectedTable ? (
           <>
-        <section className="workspace-header">
-          <div className="table-summary">
-            <div className="table-title-block">
-              <p className="eyebrow">Workspace</p>
-              <h2>{selectedTable.label}</h2>
-              <p className="hero-copy">
-                {selectedTable.description ??
-                  `Manage ${selectedTable.label.toLowerCase()} with safe forms, bulk import, and protected system fields.`}
-              </p>
-            </div>
-
-            <div className="hero-stats" aria-label="Workspace stats">
-              <div className="stat-card">
-                <span>Total Entries</span>
-                <strong>{total}</strong>
-              </div>
-              <div className="stat-card">
-                <span>Editable</span>
-                <strong>{editableFieldCount}</strong>
-              </div>
-              <div className="stat-card">
-                <span>Connected</span>
-                <strong>{connectedTableCount}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="header-actions">
-            <button
-              className="ghost-button button-with-spinner"
-              disabled={loadingRecords || refreshing}
-              onClick={() => void handleRefreshClick()}
-              type="button"
-            >
-              {refreshing ? <span aria-hidden="true" className="spin" /> : null}
-              {refreshing ? "Refreshing…" : "Refresh"}
-            </button>
-            <button
-              className="ghost-button button-with-spinner"
-              disabled={loadingRecords || exporting}
-              onClick={() => void handleExportClick()}
-              type="button"
-            >
-              {exporting ? <span aria-hidden="true" className="spin" /> : null}
-              {exporting ? "Exporting…" : "Export"}
-            </button>
-            <button
-              className="ghost-button"
-              disabled={selectedTable.readOnly}
-              onClick={() =>
-                setImportState({
-                  fileName: "",
-                  sheetNames: [],
-                  selectedSheetName: "",
-                  rowsBySheet: {},
-                  rows: []
-                })
-              }
-              type="button"
-            >
-              Import
-            </button>
-            <button className="primary-button" disabled={selectedTable.readOnly} onClick={openCreateEditor} type="button">
-              Add Entry
-            </button>
-          </div>
-        </section>
-
-        <section className="panel controls">
-          <div className="controls-copy">
-            <form className="search-form" onSubmit={handleSearchSubmit}>
-              <label className="search">
-                <span>Search entries</span>
-                <div className="search-input-group">
-                  <input
-                    value={searchInput}
-                    onChange={(event) => setSearchInput(event.target.value)}
-                    placeholder={`Search ${selectedTable.label.toLowerCase()}...`}
-                    type="search"
-                  />
-                  <button className="ghost-button" disabled={loadingRecords} type="submit">
-                    Search
-                  </button>
+            <section className="workspace-header">
+              <div className="table-summary">
+                <div className="table-title-block">
+                  <p className="eyebrow">Workspace</p>
+                  <h2>{selectedTable.label}</h2>
+                  <p className="hero-copy">
+                    {selectedTable.description ??
+                      `Manage ${selectedTable.label.toLowerCase()} with safe forms, bulk import, and protected system fields.`}
+                  </p>
                 </div>
-              </label>
-            </form>
-            <p className="helper-note">
-              System-managed fields stay hidden. Imports ignore them even if they appear in the sheet.
-            </p>
-          </div>
-        </section>
 
-        {error ? <p className="banner error">{error}</p> : null}
-        {notice ? <p className="banner success">{notice}</p> : null}
+                <div className="hero-stats" aria-label="Workspace stats">
+                  <div className="stat-card">
+                    <span>Total Entries</span>
+                    <strong>{total}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span>Editable</span>
+                    <strong>{editableFieldCount}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span>Connected</span>
+                    <strong>{connectedTableCount}</strong>
+                  </div>
+                </div>
+              </div>
 
-        <section className="panel table-panel" aria-busy={loadingRecords}>
-          <div className="table-meta">
-            <span>
-              Page {page + 1} of {pageCount}
-            </span>
-            <span className={loadingRecords ? "table-loading-status active" : "table-loading-status"}>
-              {loadingRecords ? "Loading entries..." : `${records.length} entries loaded`}
-            </span>
-          </div>
+              <div className="header-actions">
+                <button
+                  className="ghost-button button-with-spinner"
+                  disabled={loadingRecords || refreshing}
+                  onClick={() => void handleRefreshClick()}
+                  type="button"
+                >
+                  {refreshing ? <span aria-hidden="true" className="spin" /> : null}
+                  {refreshing ? "Refreshing…" : "Refresh"}
+                </button>
+                <button
+                  className="ghost-button button-with-spinner"
+                  disabled={loadingRecords || exporting}
+                  onClick={() => void handleExportClick()}
+                  type="button"
+                >
+                  {exporting ? <span aria-hidden="true" className="spin" /> : null}
+                  {exporting ? "Exporting…" : "Export"}
+                </button>
+                <button
+                  className="ghost-button"
+                  disabled={selectedTable.readOnly}
+                  onClick={() =>
+                    setImportState({
+                      fileName: "",
+                      sheetNames: [],
+                      selectedSheetName: "",
+                      rowsBySheet: {},
+                      rows: []
+                    })
+                  }
+                  type="button"
+                >
+                  Import
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={selectedTable.readOnly}
+                  onClick={openCreateEditor}
+                  type="button"
+                >
+                  Add Entry
+                </button>
+              </div>
+            </section>
 
-          <div className="table-scroller">
-            <table>
-              <thead>
-                <tr>
-                  {visibleColumns.map((column) => (
-                    <th key={column.name} scope="col">{column.label}</th>
-                  ))}
-                  <th className="actions-column" scope="col">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.length === 0 ? (
-                  <tr>
-                    <td colSpan={visibleColumns.length + 1}>
-                      <div className="empty-state">No entries matched the current query.</div>
-                    </td>
-                  </tr>
-                ) : (
-                  records.map((row, index) => (
-                    <tr key={createRowKey(selectedTable, row, index)}>
-                      {visibleColumns.map((column) => (
-                        <td key={column.name}>
-                          {formatColumnValue(column, row[column.name], lookups)}
-                        </td>
-                      ))}
-                      <td className="actions-cell">
-                        <div className="row-actions">
-                          {selectedTable.readOnly ? (
-                            <button onClick={() => openEditEditor(row)} type="button">
-                              View
-                            </button>
-                          ) : (
-                            <>
-                              <button onClick={() => openEditEditor(row)} type="button">
-                                Edit
-                              </button>
-                              <button
-                                className="danger-link"
-                                onClick={() => void handleDeleteRecord(row)}
-                                type="button"
-                              >
-                                Delete
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+            <section className="panel controls">
+              <div className="controls-copy">
+                <form className="search-form" onSubmit={handleSearchSubmit}>
+                  <label className="search">
+                    <span>Search entries</span>
+                    <div className="search-input-group">
+                      <input
+                        value={searchInput}
+                        onChange={(event) => setSearchInput(event.target.value)}
+                        placeholder={`Search ${selectedTable.label.toLowerCase()}...`}
+                        type="search"
+                      />
+                      <button className="ghost-button" disabled={loadingRecords} type="submit">
+                        Search
+                      </button>
+                    </div>
+                  </label>
+                </form>
+                <p className="helper-note">
+                  System-managed fields stay hidden. Imports ignore them even if they appear in the sheet.
+                </p>
+              </div>
+            </section>
 
-          <div className="pagination">
-            <button disabled={page === 0 || loadingRecords} onClick={() => setPage((value) => value - 1)} type="button">
-              Previous
-            </button>
-            <button
-              disabled={page + 1 >= pageCount || loadingRecords}
-              onClick={() => setPage((value) => value + 1)}
-              type="button"
-            >
-              Next
-            </button>
-          </div>
-        </section>
+            <StatusBanner variant="error">{error}</StatusBanner>
+            <StatusBanner variant="success">{notice}</StatusBanner>
+
+            <DataTable
+              columns={visibleColumns}
+              createRowKey={createRowKey}
+              formatColumnValue={formatColumnValue}
+              loading={loadingRecords}
+              lookups={lookups}
+              onDelete={(row) => void handleDeleteRecord(row)}
+              onEdit={openEditEditor}
+              page={page}
+              pageCount={pageCount}
+              records={records}
+              setPage={setPage}
+              table={selectedTable}
+            />
           </>
+        ) : (
+          <div className="empty-state">Choose a workspace from the sidebar.</div>
         )}
       </main>
 
-      {editor ? (
+      {editor && selectedTable ? (
         <div className="overlay">
           <section className="dialog">
             <div className="dialog-head">
               <div>
-                <p className="eyebrow">{selectedTable.readOnly ? "View" : editor.mode === "create" ? "Create" : "Edit"}</p>
+                <p className="eyebrow">
+                  {selectedTable.readOnly ? "View" : editor.mode === "create" ? "Create" : "Edit"}
+                </p>
                 <h3>{selectedTable.label} Entry</h3>
                 <p className="dialog-copy">
                   {selectedTable.readOnly
@@ -1302,7 +1339,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
                 {editableColumns.map((column) => {
                   const disabled = selectedTable.readOnly || (editor.mode === "edit" && column.isPrimaryKey);
                   const foreignOptions = column.foreignKey
-                    ? lookups[column.foreignKey.referencesTable] ?? []
+                    ? (lookups[column.foreignKey.referencesTable] ?? [])
                     : [];
 
                   return (
@@ -1312,32 +1349,32 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
                         {column.nullable ? " optional" : ""}
                       </span>
 
-                    {column.foreignKey ? (
-                      <select
-                        disabled={disabled}
-                        value={formState[column.name] ?? ""}
-                        onChange={(event) =>
+                      {column.foreignKey ? (
+                        <select
+                          disabled={disabled}
+                          value={formState[column.name] ?? ""}
+                          onChange={(event) =>
+                            setFormState((current) => ({
+                              ...current,
+                              [column.name]: event.target.value
+                            }))
+                          }
+                        >
+                          <option value="">Select {column.label}</option>
+                          {foreignOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        renderFieldInput(column, formState[column.name] ?? "", disabled, (value) =>
                           setFormState((current) => ({
                             ...current,
-                            [column.name]: event.target.value
+                            [column.name]: value
                           }))
-                        }
-                      >
-                        <option value="">Select {column.label}</option>
-                        {foreignOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      renderFieldInput(column, formState[column.name] ?? "", disabled, (value) =>
-                        setFormState((current) => ({
-                          ...current,
-                          [column.name]: value
-                        }))
-                      )
-                    )}
+                        )
+                      )}
                     </label>
                   );
                 })}
@@ -1386,7 +1423,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         </div>
       ) : null}
 
-      {importState ? (
+      {importState && selectedTable ? (
         <div className="overlay">
           <section className="dialog import-dialog">
             <div className="dialog-head">
@@ -1394,8 +1431,9 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
                 <p className="eyebrow">Excel Import</p>
                 <h3>{selectedTable.label}</h3>
                 <p className="dialog-copy">
-                  Match spreadsheet headers to the supported import fields. Existing entries are updated when the
-                  matching fields line up, blank cells keep existing values, and system-managed fields are ignored.
+                  Match spreadsheet headers to the supported import fields. Existing entries are updated when
+                  the matching fields line up, blank cells keep existing values, and system-managed fields are
+                  ignored.
                 </p>
               </div>
             </div>
@@ -1488,8 +1526,15 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
               </div>
             ) : activeImportMatcher ? (
               <div className="helper-note import-match-note">
-                This file will match existing entries using <code>{activeImportMatcher.join(" + ")}</code>. Non-empty
-                cells update matching entries, while blank cells keep the current value.
+                This file will match existing entries using <code>{activeImportMatcher.join(" + ")}</code>.
+                Non-empty cells update matching entries, while blank cells keep the current value.
+              </div>
+            ) : null}
+
+            {importState.rows.length > IMPORT_PREVIEW_LIMIT ? (
+              <div className="helper-note">
+                Showing the first {IMPORT_PREVIEW_LIMIT} of {importState.rows.length} parsed entries. All rows
+                will be imported.
               </div>
             ) : null}
 
@@ -1500,13 +1545,19 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
                     <tr>
                       <th>#</th>
                       {previewColumns.map((column) => (
-                        <th key={column}>{getImportHeaderName(selectedTable.columns.find((entry) => entry.name === column) ?? column)}</th>
+                        <th key={column}>
+                          {getImportHeaderName(
+                            selectedTable.columns.find((entry) => entry.name === column) ?? column
+                          )}
+                        </th>
                       ))}
-                      <th className="actions-column" scope="col">Actions</th>
+                      <th className="actions-column" scope="col">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {importState.rows.map((row, rowIndex) => (
+                    {previewRows.map((row, rowIndex) => (
                       <tr key={`preview-${rowIndex}`}>
                         <td>{rowIndex + 1}</td>
                         {previewColumns.map((column) => (
@@ -1569,7 +1620,9 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
             <form className="record-form" onSubmit={handleSaveImportRow}>
               <div className="form-grid">
                 {importableColumns.map((column) => {
-                  const foreignOptions = column.foreignKey ? lookups[column.foreignKey.referencesTable] ?? [] : [];
+                  const foreignOptions = column.foreignKey
+                    ? (lookups[column.foreignKey.referencesTable] ?? [])
+                    : [];
 
                   return (
                     <label className="field" key={`import-${column.name}`}>
@@ -1652,7 +1705,10 @@ interface FacilityRelationsEditorProps {
   onAddAccreditation: (id: string) => void;
   onAddChemistry: (id: string) => void;
   onAddProduct: (id: string) => void;
-  onQuickCreate: (key: RelationSearchKey, values: { name: string; casNumber?: string; productName?: string }) => void;
+  onQuickCreate: (
+    key: RelationSearchKey,
+    values: { name: string; casNumber?: string; productName?: string }
+  ) => void;
   onSearchChange: (key: RelationSearchKey, value: string) => void;
   onTabChange: (key: RelationSearchKey) => void;
   onUpdateDraft: (
@@ -1696,7 +1752,9 @@ function FacilityRelationsEditor({
       <div className="relation-editor-head">
         <div>
           <strong>Facility relations</strong>
-          <p className="helper-note">Search existing catalog items or create missing ones without leaving this form.</p>
+          <p className="helper-note">
+            Search existing catalog items or create missing ones without leaving this form.
+          </p>
         </div>
         {loading ? <span className="relation-status">Loading relations...</span> : null}
       </div>
@@ -1794,7 +1852,9 @@ function FacilityRelationsEditor({
             onRemove={(index) =>
               onUpdateDraft((current) => ({
                 ...current,
-                accreditations: (current.accreditations ?? []).filter((_entry, entryIndex) => entryIndex !== index)
+                accreditations: (current.accreditations ?? []).filter(
+                  (_entry, entryIndex) => entryIndex !== index
+                )
               }))
             }
           />
@@ -1896,7 +1956,9 @@ function RelationSearchBox({
                   {isProduct ? (
                     <span className="product-search-result-meta">
                       <small>{option.meta?.productId ?? option.value}</small>
-                      <strong className="relation-result-main">{option.meta?.casNumber ?? option.label}</strong>
+                      <strong className="relation-result-main">
+                        {option.meta?.casNumber ?? option.label}
+                      </strong>
                     </span>
                   ) : (
                     <span>
@@ -2264,7 +2326,7 @@ function buildRowFromForm(columns: ColumnMeta[], formState: FormState): RowRecor
 }
 
 function getImportHeaderName(column: ColumnMeta | string): string {
-  return typeof column === "string" ? column : column.importHeader ?? column.name;
+  return typeof column === "string" ? column : (column.importHeader ?? column.name);
 }
 
 function normalizeImportedRow(table: TableMeta, row: RowRecord): RowRecord {
@@ -2321,11 +2383,7 @@ function getRowTitle(table: TableMeta, row: RowRecord, lookups: LookupCache) {
   return `${table.label} entry`;
 }
 
-function formatColumnValue(
-  column: ColumnMeta,
-  value: unknown,
-  lookups: LookupCache
-): string {
+function formatColumnValue(column: ColumnMeta, value: unknown, lookups: LookupCache): string {
   if (column.foreignKey) {
     const options = lookups[column.foreignKey.referencesTable] ?? [];
     const match = options.find((option) => option.value === String(value ?? ""));
@@ -2371,18 +2429,19 @@ function createRowKey(table: TableMeta, row: RowRecord, index: number) {
 
 async function fetchRecordsForExport(tableName: string, search: string): Promise<RowRecord[]> {
   const rows: RowRecord[] = [];
-  const limit = 500;
+  const limit = EXPORT_PAGE_SIZE;
   let offset = 0;
-  let total = 0;
 
-  do {
+  while (true) {
     const data = await api<RecordsResponse>(
-      `/api/records/${tableName}?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}`
+      `/api/records/${tableName}?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}&view=export`
     );
     rows.push(...data.records);
-    total = data.total;
     offset += data.records.length;
-  } while (offset < total);
+    if (offset >= data.total || data.records.length === 0) {
+      break;
+    }
+  }
 
   return rows;
 }
@@ -2446,67 +2505,6 @@ function slugifyValue(value: string) {
   return slug || `item-${Date.now()}`;
 }
 
-async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  const token = await window.Clerk?.session?.getToken();
-
-  if (!token) {
-    throw new Error("You must be signed in to continue.");
-  }
-
-  headers.set("Authorization", `Bearer ${token}`);
-
-  const response = await fetch(url, {
-    ...init,
-    headers
-  });
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  const data = (await response.json()) as T & { error?: string };
-
-  if (!response.ok) {
-    throw new Error(data.error ?? "Request failed.");
-  }
-
-  return data;
-}
-
-function NavigationGroup({
-  activeView,
-  collapsed,
-  label,
-  items,
-  onSelect
-}: {
-  activeView: string;
-  collapsed: boolean;
-  label: string;
-  items: Array<{ id: string; label: string; icon: ReactNode }>;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <section className="nav-group">
-      {!collapsed ? <p>{label}</p> : null}
-      {items.map((item) => (
-        <button
-          aria-current={activeView === item.id ? "page" : undefined}
-          className={activeView === item.id ? "nav-item active" : "nav-item"}
-          key={item.id}
-          onClick={() => onSelect(item.id)}
-          title={collapsed ? item.label : undefined}
-          type="button"
-        >
-          {item.icon}
-          <span>{item.label}</span>
-        </button>
-      ))}
-    </section>
-  );
-}
-
 function navigateWorkspace(id: string, setActiveView: (value: string) => void) {
   const hash = `#/${id}`;
   if (window.location.hash !== hash) {
@@ -2518,31 +2516,4 @@ function navigateWorkspace(id: string, setActiveView: (value: string) => void) {
 function readWorkspaceHash() {
   const value = window.location.hash.replace(/^#\/?/, "");
   return value || "overview";
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
-}
-
-declare global {
-  interface Window {
-    Clerk?: {
-      session?: {
-        getToken: () => Promise<string | null>;
-      } | null;
-      signOut: () => Promise<void>;
-    };
-  }
-}
-
-function toDateTimeLocalValue(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
 }

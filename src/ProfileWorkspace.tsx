@@ -1,20 +1,15 @@
-import { useAuth, useUser } from "@clerk/react";
+import { useUser } from "@clerk/react";
 import { Camera, CheckCircle2, LogOut, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-
-interface AdminIdentity {
-  id: string;
-  email: string | null;
-  firstName: string | null;
-  lastName: string | null;
-  imageUrl: string | null;
-  role: "admin";
-}
+import type { AdminUser } from "../shared/types";
+import { useSyncUserProfileMutation } from "./features/profile/hooks";
+import { getClerkErrorMessage } from "./lib/errors";
+import { StatusBanner } from "./components/StatusBanner";
 
 interface ProfileWorkspaceProps {
-  adminUser?: AdminIdentity | null;
-  onAdminUserChange: (user: AdminIdentity) => void;
+  adminUser?: AdminUser | null;
+  onAdminUserChange: (user: AdminUser) => void;
 }
 
 type AvatarChange =
@@ -22,11 +17,7 @@ type AvatarChange =
   | { type: "remove" }
   | { type: "replace"; file: File; previewUrl: string };
 
-export default function ProfileWorkspace({
-  adminUser,
-  onAdminUserChange
-}: ProfileWorkspaceProps) {
-  const { getToken } = useAuth();
+export default function ProfileWorkspace({ adminUser, onAdminUserChange }: ProfileWorkspaceProps) {
   const { isLoaded, user } = useUser();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [firstName, setFirstName] = useState(adminUser?.firstName ?? "");
@@ -35,6 +26,7 @@ export default function ProfileWorkspace({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const syncProfile = useSyncUserProfileMutation(adminUser);
 
   useEffect(() => {
     setFirstName(adminUser?.firstName ?? "");
@@ -100,9 +92,6 @@ export default function ProfileWorkspace({
       }
 
       await user.reload();
-      const token = await getToken();
-      if (!token) throw new Error("Your session expired. Please sign in again.");
-
       const syncedProfile = {
         email: user.primaryEmailAddress?.emailAddress ?? adminUser.email,
         firstName: user.firstName,
@@ -110,18 +99,7 @@ export default function ProfileWorkspace({
         imageUrl: user.hasImage ? user.imageUrl : null,
         emailVerified: user.primaryEmailAddress?.verification?.status === "verified"
       };
-      const response = await fetch("/api/users/sync", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(syncedProfile)
-      });
-      const data = (await response.json().catch(() => null)) as { error?: string } | null;
-      if (!response.ok) {
-        throw new Error(data?.error ?? "Your profile changed, but the admin record could not be synced.");
-      }
+      await syncProfile.mutateAsync(syncedProfile);
 
       onAdminUserChange({
         ...adminUser,
@@ -133,7 +111,7 @@ export default function ProfileWorkspace({
       setAvatarChange({ type: "keep" });
       setNotice("Profile updated successfully.");
     } catch (caughtError) {
-      setError(getProfileError(caughtError));
+      setError(getClerkErrorMessage(caughtError, "Unable to update your profile."));
     } finally {
       setBusy(false);
     }
@@ -153,7 +131,9 @@ export default function ProfileWorkspace({
   return (
     <div className="profile-page">
       <header className="profile-hero">
-        <div className="profile-hero-icon"><UserRound size={22} /></div>
+        <div className="profile-hero-icon">
+          <UserRound size={22} />
+        </div>
         <div>
           <p className="eyebrow">Account</p>
           <h2>Your profile</h2>
@@ -167,7 +147,9 @@ export default function ProfileWorkspace({
             <h3>Profile details</h3>
             <p>Update your name and profile image.</p>
           </div>
-          <span className="profile-role-badge"><ShieldCheck size={14} /> Administrator</span>
+          <span className="profile-role-badge">
+            <ShieldCheck size={14} /> Administrator
+          </span>
         </div>
 
         <div className="profile-content">
@@ -239,8 +221,14 @@ export default function ProfileWorkspace({
           </div>
         </div>
 
-        {error ? <p className="profile-status error">{error}</p> : null}
-        {notice ? <p className="profile-status success"><CheckCircle2 size={16} /> {notice}</p> : null}
+        <StatusBanner variant="error">{error}</StatusBanner>
+        <StatusBanner variant="success">
+          {notice ? (
+            <>
+              <CheckCircle2 size={16} /> {notice}
+            </>
+          ) : null}
+        </StatusBanner>
 
         <div className="profile-card-actions">
           <button className="primary-button" disabled={busy || !isLoaded} type="submit">
@@ -256,7 +244,7 @@ export default function ProfileWorkspace({
         </div>
         <button
           className="profile-signout-button"
-          onClick={() => void window.Clerk?.signOut()}
+          onClick={() => void window.Clerk?.signOut?.()}
           type="button"
         >
           <LogOut size={16} /> Sign out
@@ -275,17 +263,4 @@ function getInitials(firstName: string, lastName: string, email?: string | null)
     email?.slice(0, 1).toUpperCase() ||
     "A"
   );
-}
-
-function getProfileError(error: unknown) {
-  if (
-    error &&
-    typeof error === "object" &&
-    "errors" in error &&
-    Array.isArray((error as { errors?: unknown }).errors)
-  ) {
-    const [first] = (error as { errors: Array<{ longMessage?: string; message?: string }> }).errors;
-    return first?.longMessage ?? first?.message ?? "Unable to update your profile.";
-  }
-  return error instanceof Error ? error.message : "Unable to update your profile.";
 }

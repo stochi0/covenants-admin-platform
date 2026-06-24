@@ -13,8 +13,8 @@ import {
   listRecords,
   upsertFacilityRelations,
   updateRecord
-} from "./data.js";
-import { requireAdmin, verifyClerkHeaders, type AuthenticatedAdminRequest } from "./auth.js";
+} from "./modules/records.js";
+import { authenticateAdmin, clearAdminCache, requireAdmin, verifyClerkHeaders, type AuthenticatedAdminRequest } from "./auth.js";
 import {
   createEnquiry,
   getDashboardMetrics,
@@ -28,8 +28,8 @@ import {
   sendDispatches,
   updateEnquiryResolution,
   upsertQuote
-} from "./enquiries.js";
-import { upsertUserProfile } from "./users.js";
+} from "./modules/workflow.js";
+import { upsertUserProfile } from "./modules/users.js";
 
 dotenv.config();
 
@@ -87,9 +87,15 @@ app.post("/api/users/sync", async (req, res) => {
       imageUrl: readString(body.imageUrl),
       emailVerified: body.emailVerified === true
     });
+    clearAdminCache(claims.sub!);
+    const user = await authenticateAdmin(req.headers);
 
-    res.status(200).json({ id });
+    res.status(200).json({ id, user });
   } catch (error) {
+    if (error instanceof Error && error.name === "ForbiddenError") {
+      res.status(403).json({ error: "Admin access is required." });
+      return;
+    }
     console.error("User sync failed:", error);
     res.status(500).json({
       error: "Unable to prepare your account."
@@ -225,7 +231,8 @@ app.get("/api/records/:table", async (req, res) => {
     const limit = clampNumber(req.query.limit, 25, 1, 100);
     const offset = clampNumber(req.query.offset, 0, 0, 10_000);
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
-    const data = await listRecords(req.params.table, { limit, offset, search });
+    const includeAllColumns = req.query.view === "export";
+    const data = await listRecords(req.params.table, { includeAllColumns, limit, offset, search });
     res.json(data);
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });
@@ -276,7 +283,10 @@ app.get("/api/options/:table", async (req, res) => {
     const variant = typeof req.query.variant === "string" ? req.query.variant : undefined;
     const ids =
       typeof req.query.ids === "string"
-        ? req.query.ids.split(",").map((id) => id.trim()).filter(Boolean)
+        ? req.query.ids
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean)
         : undefined;
     const data = await getOptions(req.params.table, { ids, search, limit, variant });
     res.json(data);

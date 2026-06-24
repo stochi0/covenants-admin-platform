@@ -71,12 +71,7 @@ function toDbError(error: unknown): DbError {
   return { message: error instanceof Error ? error.message : "Database request failed." };
 }
 
-function addWhereClause(
-  clauses: string[],
-  params: unknown[],
-  filter: Filter,
-  startIndex: number
-): number {
+function addWhereClause(clauses: string[], params: unknown[], filter: Filter, startIndex: number): number {
   const column = quoteIdentifier(filter.column);
 
   if (filter.operator === "is") {
@@ -281,7 +276,8 @@ class PgQueryBuilder<T extends QueryResultRow = QueryResultRow> implements Promi
       this.orders.length > 0
         ? ` order by ${this.orders
             .map((order) => {
-              const nulls = order.nullsFirst === undefined ? "" : order.nullsFirst ? " nulls first" : " nulls last";
+              const nulls =
+                order.nullsFirst === undefined ? "" : order.nullsFirst ? " nulls first" : " nulls last";
               return `${quoteIdentifier(order.column)} ${order.ascending ? "asc" : "desc"}${nulls}`;
             })
             .join(", ")}`
@@ -334,7 +330,7 @@ class PgQueryBuilder<T extends QueryResultRow = QueryResultRow> implements Promi
   }
 
   private async executeUpdate(): Promise<MutationResult<T>> {
-    const payload = Array.isArray(this.payload) ? this.payload[0] : this.payload ?? {};
+    const payload = Array.isArray(this.payload) ? this.payload[0] : (this.payload ?? {});
     const columns = Object.keys(payload);
     if (columns.length === 0) {
       throw new Error("Update payload cannot be empty.");
@@ -367,7 +363,11 @@ class PgQueryBuilder<T extends QueryResultRow = QueryResultRow> implements Promi
       return { data: null, error: null, count };
     }
     if (rows.length !== 1) {
-      return { data: null, error: { message: rows.length === 0 ? "No rows returned." : "Multiple rows returned." }, count };
+      return {
+        data: null,
+        error: { message: rows.length === 0 ? "No rows returned." : "Multiple rows returned." },
+        count
+      };
     }
     return { data: rows[0] ?? null, error: null, count };
   }

@@ -1,11 +1,4 @@
-export type ColumnKind =
-  | "text"
-  | "uuid"
-  | "number"
-  | "boolean"
-  | "date"
-  | "timestamp"
-  | "custom";
+export type ColumnKind = "text" | "uuid" | "number" | "boolean" | "date" | "timestamp" | "custom";
 
 export interface ForeignKeyMeta {
   column: string;
@@ -102,4 +95,87 @@ export interface FacilityRelationsUpsertRequest {
     awardedAt?: string | null;
     expiresAt?: string | null;
   }>;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  imageUrl: string | null;
+  role: "admin";
+}
+
+export interface AdminMeResponse {
+  user: AdminUser;
+}
+
+// API requests use camelCase DTOs. Some list/detail responses intentionally
+// return database-shaped rows while the UI is migrated feature by feature.
+export type ApiRecord = Record<string, any>;
+
+export interface ListResponse<T = ApiRecord> {
+  records: T[];
+  total: number;
+}
+
+export interface DashboardMetricsResponse {
+  summary?: Record<string, number>;
+  monthly?: ApiRecord[];
+  topProducts?: ApiRecord[];
+}
+
+export interface EnquiryDraftQuantity {
+  quantity: number;
+  unit: string;
+}
+
+export interface EnquiryDraftItemInput {
+  productId: string | null;
+  productName: string | null;
+  casNumber: string | null;
+  remarks: string | null;
+  quantities: EnquiryDraftQuantity[];
+}
+
+export interface EnquiryInput {
+  customerName: string;
+  customerEmail?: string | null;
+  customerCompany?: string | null;
+  externalReference?: string | null;
+  enquiryType?: string | null;
+  receivedAt: string;
+  notes?: string | null;
+  items: EnquiryDraftItemInput[];
+}
+
+export interface EnquiryImportRow {
+  externalReference?: unknown;
+  customerName?: unknown;
+  customerEmail?: unknown;
+  customerCompany?: unknown;
+  enquiryType?: unknown;
+  receivedAt?: unknown;
+  productName?: unknown;
+  casNumber?: unknown;
+  quantity?: unknown;
+  unit?: unknown;
+  remarks?: unknown;
+}
+
+export interface EnquiryImportResponse {
+  created: number;
+}
+
+export interface ProductSearchResponse {
+  records: ApiRecord[];
+}
+
+export interface VendorCandidatesResponse {
+  records: ApiRecord[];
+}
+
+export interface DispatchSendResponse {
+  sent: number;
+  failed: number;
 }

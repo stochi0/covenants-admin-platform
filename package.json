@@ -4,13 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
+    "dev": "concurrently \"pnpm:dev:server\" \"pnpm:dev:client\"",
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
-    "build": "npm run build:client && npm run build:server",
-    "build:client": "npm run typecheck:client && vite build",
+    "build": "pnpm build:client && pnpm build:server",
+    "build:client": "pnpm typecheck:client && vite build",
     "build:server": "tsc -p tsconfig.server.json",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "eslint src server shared",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "pnpm typecheck:client && pnpm typecheck:server",
     "typecheck:client": "tsc --noEmit -p tsconfig.json",
+    "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
     "db:migrate": "node scripts/apply-migrations.mjs",
     "db:seed:controlled": "node scripts/seed-controlled-substances.mjs",
     "start": "node dist/server/server/index.js"
@@ -18,6 +24,7 @@
   "dependencies": {
     "@clerk/react": "^6.7.2",
     "@radix-ui/react-dialog": "^1.1.17",
+    "@tanstack/react-query": "^5.101.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
@@ -30,6 +37,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/node": "^24.5.2",
@@ -39,8 +47,14 @@
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.0.4",
     "concurrently": "^9.2.1",
+    "eslint": "^10.5.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "prettier": "^3.8.4",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2",
-    "vite": "^7.1.7"
+    "typescript-eslint": "^8.62.0",
+    "vite": "^7.1.7",
+    "vitest": "^4.1.9"
   }
 }
