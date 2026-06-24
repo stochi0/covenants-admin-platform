@@ -451,25 +451,27 @@ function EnquiryDetail({
         </select>
       </div>
 
-      <div className="item-tabs">
-        {detail.items?.map((item: RecordValue, index: number) => {
-          const product = getProductDisplay(item);
-          return (
-            <button
-              className={item.id === activeItem?.id ? "active" : ""}
-              key={item.id}
-              onClick={() => {
-                setActiveItemId(item.id);
-                setAcknowledged(false);
-              }}
-              title={product.title}
-              type="button"
-            >
-              <span>{index + 1}</span><span className="item-tab-label">{product.primary}</span>
-            </button>
-          );
-        })}
-      </div>
+      {detail.items?.length > 1 ? (
+        <div className="item-tabs">
+          {detail.items.map((item: RecordValue, index: number) => {
+            const product = getProductDisplay(item);
+            return (
+              <button
+                className={item.id === activeItem?.id ? "active" : ""}
+                key={item.id}
+                onClick={() => {
+                  setActiveItemId(item.id);
+                  setAcknowledged(false);
+                }}
+                title={product.title}
+                type="button"
+              >
+                <span>{index + 1}</span><span className="item-tab-label">{product.primary}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {activeItem ? (
         <>
