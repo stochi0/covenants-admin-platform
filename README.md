@@ -22,8 +22,14 @@ Run the app and API together:
 
 ```bash
 npm install
+npm run db:migrate
+npm run db:seed:controlled
 npm run dev
 ```
+
+`db:seed:controlled` is a one-time, idempotent migration from the legacy Narcotics workbook into
+`public.controlled_substances`. Product/vendor spreadsheets and legacy enquiry CSV files are never
+used by the application; Supabase is the sole runtime source of truth.
 
 ## Clerk Auth
 
@@ -93,5 +99,8 @@ Manual checks:
 - Signed-out users see the login screen.
 - Signed-in non-admin users see "Admin role required".
 - Signed-in admins can load schema, records, options, imports, and facility relations.
+- Admins can create/import multi-item enquiries, derive vendors from active Supabase facilities,
+  send audited enquiries, and record vendor responses.
+- Controlled CAS matches require acknowledgement before dispatch.
 - `https://admin.capillia.covenantspc.com/api/health` returns `{ "ok": true }`.
 - Clerk webhook delivery succeeds from the Clerk Dashboard.

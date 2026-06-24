@@ -1,4 +1,4 @@
-import { supabase } from "./supabase.js";
+import { getPool, supabase } from "./supabase.js";
 
 export interface UserProfile {
   clerkUserId: string;
@@ -13,62 +13,37 @@ const DEFAULT_USER_ROLE = "viewer";
 
 export async function upsertUserProfile(profile: UserProfile): Promise<string> {
   const now = new Date().toISOString();
-  const profileFields = {
-    email: profile.email,
-    first_name: profile.firstName,
-    last_name: profile.lastName,
-    image_url: profile.imageUrl,
-    email_verified: profile.emailVerified,
-    last_seen_at: now,
-    deleted_at: null
-  };
+  const result = await getPool().query<{ id: string }>(
+    `insert into public.users (
+       clerk_user_id, email, role, first_name, last_name, image_url,
+       email_verified, last_seen_at, deleted_at
+     ) values ($1,$2,$3,$4,$5,$6,$7,$8,null)
+     on conflict (clerk_user_id) do update set
+       email = excluded.email,
+       first_name = excluded.first_name,
+       last_name = excluded.last_name,
+       image_url = excluded.image_url,
+       email_verified = excluded.email_verified,
+       last_seen_at = excluded.last_seen_at,
+       deleted_at = null
+     returning id`,
+    [
+      profile.clerkUserId,
+      profile.email,
+      DEFAULT_USER_ROLE,
+      profile.firstName,
+      profile.lastName,
+      profile.imageUrl,
+      profile.emailVerified,
+      now
+    ]
+  );
 
-  const { data: existingUser, error: lookupError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("clerk_user_id", profile.clerkUserId)
-    .maybeSingle();
-
-  if (lookupError) {
-    throw new Error(lookupError.message);
-  }
-
-  if (existingUser?.id) {
-    const { data, error } = await supabase
-      .from("users")
-      .update(profileFields)
-      .eq("clerk_user_id", profile.clerkUserId)
-      .select("id")
-      .single();
-
-    if (error) {
-      throw new Error(error.message);
-    }
-    if (!data?.id) {
-      throw new Error("Failed to update user.");
-    }
-
-    return String(data.id);
-  }
-
-  const { data, error } = await supabase
-    .from("users")
-    .insert({
-      clerk_user_id: profile.clerkUserId,
-      role: DEFAULT_USER_ROLE,
-      ...profileFields
-    })
-    .select("id")
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-  if (!data?.id) {
+  if (!result.rows[0]?.id) {
     throw new Error("Failed to upsert user.");
   }
 
-  return String(data.id);
+  return String(result.rows[0].id);
 }
 
 export async function softDeleteUserByClerkId(clerkUserId: string): Promise<void> {

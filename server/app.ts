@@ -15,6 +15,20 @@ import {
   updateRecord
 } from "./data.js";
 import { requireAdmin, verifyClerkHeaders, type AuthenticatedAdminRequest } from "./auth.js";
+import {
+  createEnquiry,
+  getDashboardMetrics,
+  getEnquiry,
+  getVendorCandidates,
+  importEnquiries,
+  listDispatches,
+  listEnquiries,
+  searchProducts,
+  selectVendors,
+  sendDispatches,
+  updateEnquiryResolution,
+  upsertQuote
+} from "./enquiries.js";
 import { upsertUserProfile } from "./users.js";
 
 dotenv.config();
@@ -87,6 +101,119 @@ app.use("/api", requireAdmin);
 
 app.get("/api/auth/me", (req: AuthenticatedAdminRequest, res) => {
   res.json({ user: req.admin });
+});
+
+app.get("/api/dashboard", async (_req, res) => {
+  try {
+    res.json(await getDashboardMetrics());
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/enquiries", async (req, res) => {
+  try {
+    res.json(
+      await listEnquiries({
+        limit: clampNumber(req.query.limit, 25, 1, 100),
+        offset: clampNumber(req.query.offset, 0, 0, 10_000),
+        search: readQueryString(req.query.search),
+        stage: readQueryString(req.query.stage),
+        from: readQueryString(req.query.from),
+        to: readQueryString(req.query.to)
+      })
+    );
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/enquiries", async (req: AuthenticatedAdminRequest, res) => {
+  try {
+    res.status(201).json(await createEnquiry(req.body ?? {}, req.admin!));
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/enquiries/import", async (req: AuthenticatedAdminRequest, res) => {
+  try {
+    res.json(await importEnquiries(Array.isArray(req.body?.rows) ? req.body.rows : [], req.admin!));
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/enquiries/:id", async (req, res) => {
+  try {
+    res.json(await getEnquiry(req.params.id));
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.patch("/api/enquiries/:id/resolution", async (req, res) => {
+  try {
+    res.json(await updateEnquiryResolution(req.params.id, String(req.body?.resolution ?? "")));
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/enquiry-products", async (req, res) => {
+  try {
+    res.json({ records: await searchProducts(readQueryString(req.query.search) ?? "") });
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/enquiry-items/:id/vendors", async (req, res) => {
+  try {
+    res.json({ records: await getVendorCandidates(req.params.id) });
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.put("/api/enquiry-items/:id/vendors", async (req: AuthenticatedAdminRequest, res) => {
+  try {
+    const companyIds = Array.isArray(req.body?.companyIds) ? req.body.companyIds.map(String) : [];
+    res.json({ records: await selectVendors(String(req.params.id), companyIds, req.admin!) });
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/enquiry-dispatches/send", async (req: AuthenticatedAdminRequest, res) => {
+  try {
+    const ids = Array.isArray(req.body?.enquiryVendorIds) ? req.body.enquiryVendorIds.map(String) : [];
+    res.json(await sendDispatches(ids, req.body?.controlledAcknowledged === true, req.admin!));
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/enquiry-dispatches", async (req, res) => {
+  try {
+    res.json(
+      await listDispatches({
+        limit: clampNumber(req.query.limit, 50, 1, 100),
+        offset: clampNumber(req.query.offset, 0, 0, 10_000),
+        status: readQueryString(req.query.status)
+      })
+    );
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.put("/api/enquiry-vendors/:id/quote", async (req: AuthenticatedAdminRequest, res) => {
+  try {
+    res.json(await upsertQuote(String(req.params.id), req.body ?? {}, req.admin!));
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
 });
 
 app.get("/api/schema", (_req, res) => {
@@ -191,4 +318,8 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readQueryString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
