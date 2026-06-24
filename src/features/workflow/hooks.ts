@@ -2,6 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import type {
   ApiRecord,
   DashboardMetricsResponse,
+  DispatchSendRequest,
   DispatchSendResponse,
   EnquiryImportResponse,
   EnquiryInput,
@@ -105,7 +106,7 @@ export function useImportEnquiriesMutation() {
 export function useSendDispatchesMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { enquiryVendorIds: string[]; controlledAcknowledged: boolean }) =>
+    mutationFn: (body: DispatchSendRequest) =>
       apiRequest<DispatchSendResponse>("/api/enquiry-dispatches/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

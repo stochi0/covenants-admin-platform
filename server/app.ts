@@ -194,7 +194,22 @@ app.put("/api/enquiry-items/:id/vendors", async (req: AuthenticatedAdminRequest,
 app.post("/api/enquiry-dispatches/send", async (req: AuthenticatedAdminRequest, res) => {
   try {
     const ids = Array.isArray(req.body?.enquiryVendorIds) ? req.body.enquiryVendorIds.map(String) : [];
-    res.json(await sendDispatches(ids, req.body?.controlledAcknowledged === true, req.admin!));
+    const recipientEmailsByVendorId: Record<string, string[]> = {};
+    if (req.body?.recipientEmails && typeof req.body.recipientEmails === "object") {
+      for (const [vendorId, emails] of Object.entries(req.body.recipientEmails)) {
+        if (Array.isArray(emails)) {
+          recipientEmailsByVendorId[String(vendorId)] = emails.map(String);
+        }
+      }
+    }
+    res.json(
+      await sendDispatches(
+        ids,
+        req.body?.controlledAcknowledged === true,
+        req.admin!,
+        recipientEmailsByVendorId
+      )
+    );
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });
   }
