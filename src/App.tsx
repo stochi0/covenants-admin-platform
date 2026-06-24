@@ -41,6 +41,12 @@ function AdminGate() {
   const [adminUser, setAdminUser] = useState<AdminMeResponse["user"] | null>(null);
   const [status, setStatus] = useState<"loading" | "authorized" | "forbidden" | "error">("loading");
   const [message, setMessage] = useState("");
+  const userId = user?.id;
+  const userEmail = user?.primaryEmailAddress?.emailAddress;
+  const userFirstName = user?.firstName;
+  const userLastName = user?.lastName;
+  const userImageUrl = user?.hasImage ? user.imageUrl : null;
+  const userEmailVerified = user?.primaryEmailAddress?.verification?.status === "verified";
 
   useEffect(() => {
     if (!isLoaded || !isUserLoaded || !user) {
@@ -51,7 +57,7 @@ function AdminGate() {
 
     async function loadAdminAccess() {
       try {
-        setStatus("loading");
+        setStatus((current) => (current === "authorized" ? current : "loading"));
         setMessage("");
 
         const token = await getToken();
@@ -66,11 +72,11 @@ function AdminGate() {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            email: user.primaryEmailAddress?.emailAddress,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            imageUrl: user.hasImage ? user.imageUrl : null,
-            emailVerified: user.primaryEmailAddress?.verification?.status === "verified"
+            email: userEmail,
+            firstName: userFirstName,
+            lastName: userLastName,
+            imageUrl: userImageUrl,
+            emailVerified: userEmailVerified
           })
         });
         const syncData = (await syncResponse.json().catch(() => null)) as
@@ -116,7 +122,17 @@ function AdminGate() {
     return () => {
       cancelled = true;
     };
-  }, [getToken, isLoaded, isUserLoaded, user]);
+  }, [
+    getToken,
+    isLoaded,
+    isUserLoaded,
+    userId,
+    userEmail,
+    userFirstName,
+    userLastName,
+    userImageUrl,
+    userEmailVerified
+  ]);
 
   if (!isLoaded || !isUserLoaded || status === "loading") {
     return (

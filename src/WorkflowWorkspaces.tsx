@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { AlertTriangle, Check, ChevronRight, CircleDollarSign, Mail, Plus, Search, Send, Trash2, Upload, X } from "lucide-react";
 
@@ -12,6 +12,7 @@ interface EnquiryListResponse {
 
 interface EnquiryDraftItem {
   productId: string;
+  productCode: string;
   productName: string;
   casNumber: string;
   quantity: string;
@@ -22,6 +23,7 @@ interface EnquiryDraftItem {
 
 const EMPTY_ITEM: EnquiryDraftItem = {
   productId: "",
+  productCode: "",
   productName: "",
   casNumber: "",
   quantity: "",
@@ -105,9 +107,10 @@ export function EnquiriesWorkspace() {
   const [detail, setDetail] = useState<RecordValue | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const hasLoadedRecords = useRef(false);
 
-  async function loadRecords(signal?: AbortSignal) {
-    setLoading(true);
+  async function loadRecords(signal?: AbortSignal, showInitialLoading = false) {
+    if (showInitialLoading) setLoading(true);
     try {
       const params = new URLSearchParams({ limit: "100", offset: "0" });
       if (search.trim()) params.set("search", search.trim());
@@ -119,22 +122,28 @@ export function EnquiriesWorkspace() {
     } catch (value) {
       if (!signal?.aborted) setError(message(value));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted) {
+        hasLoadedRecords.current = true;
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => void loadRecords(controller.signal), 220);
+    const timer = window.setTimeout(
+      () => void loadRecords(controller.signal, !hasLoadedRecords.current),
+      220
+    );
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
   }, [search, stage]);
 
-  async function openDetail(id: string) {
+  async function openDetail(id: string, preserveCurrent = false) {
     setSelectedId(id);
-    setDetail(null);
+    if (!preserveCurrent || detail?.id !== id) setDetail(null);
     try {
       setDetail(await workflowApi<RecordValue>(`/api/enquiries/${id}`));
     } catch (value) {
@@ -143,8 +152,11 @@ export function EnquiriesWorkspace() {
   }
 
   async function refreshAfterMutation(id?: string) {
-    await loadRecords();
-    if (id || selectedId) await openDetail(id || selectedId);
+    const detailId = id || selectedId;
+    await Promise.all([
+      loadRecords(),
+      detailId ? openDetail(detailId, !id && detail?.id === detailId) : Promise.resolve()
+    ]);
   }
 
   return (
@@ -226,7 +238,7 @@ export function EnquiriesWorkspace() {
           ) : detail ? (
             <EnquiryDetail
               detail={detail}
-              onRefresh={() => void refreshAfterMutation()}
+              onRefresh={() => refreshAfterMutation()}
               onNotice={setNotice}
               onError={setError}
             />
@@ -336,7 +348,7 @@ function EnquiryDetail({
   onError
 }: {
   detail: RecordValue;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
   onNotice: (value: string) => void;
   onError: (value: string) => void;
 }) {
@@ -370,7 +382,7 @@ function EnquiryDetail({
         body: JSON.stringify({ companyIds: [...selected] })
       });
       setCandidates(data.records);
-      onRefresh();
+      await onRefresh();
     } catch (value) {
       onError(message(value));
     }
@@ -398,7 +410,7 @@ function EnquiryDetail({
         body: JSON.stringify({ enquiryVendorIds: vendorIds, controlledAcknowledged: acknowledged })
       });
       onNotice(`${result.sent} sent${result.failed ? ` · ${result.failed} failed` : ""}.`);
-      onRefresh();
+      await onRefresh();
     } catch (value) {
       onError(message(value));
     } finally {
@@ -414,7 +426,7 @@ function EnquiryDetail({
         body: JSON.stringify({ resolution })
       });
       onNotice(`Enquiry marked ${resolution}.`);
-      onRefresh();
+      await onRefresh();
     } catch (value) {
       onError(message(value));
     }
@@ -440,25 +452,33 @@ function EnquiryDetail({
       </div>
 
       <div className="item-tabs">
-        {detail.items?.map((item: RecordValue, index: number) => (
-          <button
-            className={item.id === activeItem?.id ? "active" : ""}
-            key={item.id}
-            onClick={() => {
-              setActiveItemId(item.id);
-              setAcknowledged(false);
-            }}
-            type="button"
-          >
-            <span>{index + 1}</span>{item.product_name || item.cas_number}
-          </button>
-        ))}
+        {detail.items?.map((item: RecordValue, index: number) => {
+          const product = getProductDisplay(item);
+          return (
+            <button
+              className={item.id === activeItem?.id ? "active" : ""}
+              key={item.id}
+              onClick={() => {
+                setActiveItemId(item.id);
+                setAcknowledged(false);
+              }}
+              title={product.title}
+              type="button"
+            >
+              <span>{index + 1}</span><span className="item-tab-label">{product.primary}</span>
+            </button>
+          );
+        })}
       </div>
 
       {activeItem ? (
         <>
           <section className="item-summary">
-            <div><span>Product</span><strong>{activeItem.product_name || "Unmatched material"}</strong></div>
+            <div className="item-product-summary">
+              <span>Product</span>
+              <strong>{getProductDisplay(activeItem).primary}</strong>
+              {getProductDisplay(activeItem).secondary ? <small>{getProductDisplay(activeItem).secondary}</small> : null}
+            </div>
             <div><span>CAS</span><strong>{activeItem.cas_number || "—"}</strong></div>
             <div><span>Quantity</span><strong>{activeItem.quantities?.map((q: RecordValue) => `${q.quantity} ${q.unit}`).join(", ") || "—"}</strong></div>
           </section>
@@ -534,7 +554,7 @@ function EnquiryDetail({
   );
 }
 
-function QuoteRow({ vendor, onSaved, onError }: { vendor: RecordValue; onSaved: () => void; onError: (value: string) => void }) {
+function QuoteRow({ vendor, onSaved, onError }: { vendor: RecordValue; onSaved: () => Promise<void>; onError: (value: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     responseStatus: vendor.response_status || "awaiting",
@@ -556,7 +576,7 @@ function QuoteRow({ vendor, onSaved, onError }: { vendor: RecordValue; onSaved: 
         body: JSON.stringify(form)
       });
       setEditing(false);
-      onSaved();
+      await onSaved();
     } catch (value) {
       onError(message(value));
     }
@@ -610,7 +630,7 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
   }
 
   async function searchProduct(index: number, value: string) {
-    updateItem(index, { productName: value, productId: "" });
+    updateItem(index, { productName: value, productId: "", productCode: "" });
     if (value.trim().length < 2) return setResults((current) => ({ ...current, [index]: [] }));
     try {
       const data = await workflowApi<{ records: RecordValue[] }>(`/api/enquiry-products?search=${encodeURIComponent(value)}`);
@@ -733,8 +753,40 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                         <div className="draft-product-field">
                           <Field label="Product or material">
                             <div className="product-autocomplete">
-                              <input required={!item.casNumber} value={item.productName} onChange={(e) => void searchProduct(index, e.target.value)} placeholder="Search product catalog…" />
-                              {results[index]?.length ? <div className="autocomplete-results">{results[index].map((product) => <button key={product.id} onClick={() => { updateItem(index, { productId: product.id, productName: product.product_name, casNumber: product.cas_number || "" }); setResults((current) => ({ ...current, [index]: [] })); }} type="button"><strong>{product.product_name}</strong><span>{product.cas_number || "No CAS"}{product.is_controlled ? " · Controlled" : ""}</span></button>)}</div> : null}
+                              <input
+                                required={!item.casNumber}
+                                title={item.productName}
+                                value={item.productName}
+                                onChange={(e) => void searchProduct(index, e.target.value)}
+                                placeholder="Search by product name, code or CAS…"
+                              />
+                              {item.productId ? <span className="selected-product-code">Product code: {item.productCode || item.productId}</span> : null}
+                              {results[index]?.length ? (
+                                <div className="autocomplete-results">
+                                  {results[index].map((product) => (
+                                    <button
+                                      key={product.id}
+                                      onClick={() => {
+                                        updateItem(index, {
+                                          productId: product.id,
+                                          productCode: product.product_code || product.id,
+                                          productName: product.product_name || `Product code: ${product.product_code || product.id}`,
+                                          casNumber: product.cas_number || ""
+                                        });
+                                        setResults((current) => ({ ...current, [index]: [] }));
+                                      }}
+                                      type="button"
+                                    >
+                                      <strong>{product.product_name || `Product code: ${product.product_code || product.id}`}</strong>
+                                      <span>
+                                        Code: {product.product_code || product.id}
+                                        {product.cas_number ? ` · CAS: ${product.cas_number}` : ""}
+                                        {product.is_controlled ? " · Controlled" : ""}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
                             </div>
                           </Field>
                         </div>
