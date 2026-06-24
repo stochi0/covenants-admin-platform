@@ -10,8 +10,7 @@ if (!databaseUrl) {
 }
 
 const workbookPath = path.resolve(
-  process.env.CONTROLLED_SUBSTANCES_WORKBOOK ??
-    "../enquiry_system/data/Narcotics.xlsx"
+  process.env.CONTROLLED_SUBSTANCES_WORKBOOK ?? "../enquiry_system/data/Narcotics.xlsx"
 );
 if (!fs.existsSync(workbookPath)) {
   throw new Error(`Controlled-substance workbook not found: ${workbookPath}`);

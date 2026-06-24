@@ -1,9 +1,28 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
-import { AlertTriangle, Check, ChevronRight, CircleDollarSign, Mail, Plus, Search, Send, Trash2, Upload, X } from "lucide-react";
+import type { FormEvent } from "react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronRight,
+  CircleDollarSign,
+  Mail,
+  Plus,
+  Search,
+  Send,
+  Trash2,
+  Upload,
+  X
+} from "lucide-react";
+import type { ApiRecord } from "../shared/types";
+import { apiRequest as workflowApi } from "./lib/api";
+import { formatDate, formatDateTime } from "./lib/dates";
+import { getErrorMessage as message } from "./lib/errors";
+import { useDashboardQuery, useDispatchesQuery } from "./features/workflow/hooks";
+import { StatusBanner } from "./components/StatusBanner";
+import { Field } from "./components/Field";
 
-type RecordValue = Record<string, any>;
+type RecordValue = ApiRecord;
 
 interface EnquiryListResponse {
   records: RecordValue[];
@@ -33,12 +52,7 @@ const EMPTY_ITEM: EnquiryDraftItem = {
 };
 
 export function OverviewWorkspace({ onOpenEnquiries }: { onOpenEnquiries: () => void }) {
-  const [data, setData] = useState<RecordValue | null>(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    void workflowApi<RecordValue>("/api/dashboard").then(setData).catch((value) => setError(message(value)));
-  }, []);
+  const { data, error } = useDashboardQuery();
 
   const summary = data?.summary ?? {};
 
@@ -55,7 +69,7 @@ export function OverviewWorkspace({ onOpenEnquiries }: { onOpenEnquiries: () => 
         </button>
       </header>
 
-      {error ? <p className="banner error">{error}</p> : null}
+      <StatusBanner variant="error">{error ? message(error) : ""}</StatusBanner>
       <section className="metric-grid">
         {[
           ["Total enquiries", summary.total ?? "—"],
@@ -200,13 +214,17 @@ export function EnquiriesWorkspace() {
         </select>
       </section>
 
-      {error ? <p className="banner error">{error}</p> : null}
-      {notice ? <p className="banner success">{notice}</p> : null}
+      <StatusBanner variant="error">{error}</StatusBanner>
+      <StatusBanner variant="success">{notice}</StatusBanner>
 
       <section className="enquiry-layout">
         <div className="panel enquiry-list" aria-busy={loading}>
           {loading ? (
-            <div className="skeleton-stack">{Array.from({ length: 6 }, (_, index) => <span key={index} />)}</div>
+            <div className="skeleton-stack">
+              {Array.from({ length: 6 }, (_, index) => (
+                <span key={index} />
+              ))}
+            </div>
           ) : records.length ? (
             records.map((record) => (
               <button
@@ -222,7 +240,9 @@ export function EnquiriesWorkspace() {
                 <div className="enquiry-row-meta">
                   <StagePill stage={record.workflow_stage} />
                   <span>{formatDate(record.received_at)}</span>
-                  <small>{record.item_count} item{record.item_count === 1 ? "" : "s"}</small>
+                  <small>
+                    {record.item_count} item{record.item_count === 1 ? "" : "s"}
+                  </small>
                 </div>
                 <ChevronRight size={16} />
               </button>
@@ -234,7 +254,11 @@ export function EnquiriesWorkspace() {
 
         <div className="panel enquiry-detail">
           {selectedId && !detail ? (
-            <div className="skeleton-stack">{Array.from({ length: 5 }, (_, index) => <span key={index} />)}</div>
+            <div className="skeleton-stack">
+              {Array.from({ length: 5 }, (_, index) => (
+                <span key={index} />
+              ))}
+            </div>
           ) : detail ? (
             <EnquiryDetail
               detail={detail}
@@ -277,23 +301,9 @@ export function EnquiriesWorkspace() {
 }
 
 export function DispatchHistoryWorkspace() {
-  const [records, setRecords] = useState<RecordValue[]>([]);
   const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    const params = new URLSearchParams({ limit: "100", offset: "0" });
-    if (status) params.set("status", status);
-    void workflowApi<EnquiryListResponse>(`/api/enquiry-dispatches?${params}`)
-      .then((data) => {
-        setRecords(data.records);
-        setError("");
-      })
-      .catch((value) => setError(message(value)))
-      .finally(() => setLoading(false));
-  }, [status]);
+  const { data, error, isLoading } = useDispatchesQuery(status);
+  const records = data?.records ?? [];
 
   return (
     <div className="workflow-page">
@@ -310,29 +320,46 @@ export function DispatchHistoryWorkspace() {
           <option value="failed">Failed</option>
         </select>
       </header>
-      {error ? <p className="banner error">{error}</p> : null}
+      <StatusBanner variant="error">{error ? message(error) : ""}</StatusBanner>
       <section className="panel">
         <div className="table-scroller">
           <table>
             <thead>
-              <tr><th>Status</th><th>Vendor</th><th>Product</th><th>Recipients</th><th>Attempt</th><th>Created</th><th>Result</th></tr>
+              <tr>
+                <th>Status</th>
+                <th>Vendor</th>
+                <th>Product</th>
+                <th>Recipients</th>
+                <th>Attempt</th>
+                <th>Created</th>
+                <th>Result</th>
+              </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr><td colSpan={7}><div className="empty-state">Loading dispatches…</div></td></tr>
-              ) : records.map((record) => (
-                <tr key={record.id}>
-                  <td><StagePill stage={record.status} /></td>
-                  <td>{record.company_name}</td>
-                  <td>{record.product_name}</td>
-                  <td>{record.recipient_emails?.join(", ")}</td>
-                  <td>#{record.attempt_number}</td>
-                  <td>{formatDateTime(record.created_at)}</td>
-                  <td className={record.status === "failed" ? "danger-text" : ""}>
-                    {record.error_message || (record.sent_at ? `Sent ${formatDateTime(record.sent_at)}` : "Pending")}
+              {isLoading ? (
+                <tr>
+                  <td colSpan={7}>
+                    <div className="empty-state">Loading dispatches…</div>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                records.map((record) => (
+                  <tr key={record.id}>
+                    <td>
+                      <StagePill stage={record.status} />
+                    </td>
+                    <td>{record.company_name}</td>
+                    <td>{record.product_name}</td>
+                    <td>{record.recipient_emails?.join(", ")}</td>
+                    <td>#{record.attempt_number}</td>
+                    <td>{formatDateTime(record.created_at)}</td>
+                    <td className={record.status === "failed" ? "danger-text" : ""}>
+                      {record.error_message ||
+                        (record.sent_at ? `Sent ${formatDateTime(record.sent_at)}` : "Pending")}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -358,7 +385,8 @@ function EnquiryDetail({
   const [sending, setSending] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const activeItem = detail.items?.find((item: RecordValue) => item.id === activeItemId) ?? detail.items?.[0];
-  const selectedVendors = detail.vendors?.filter((vendor: RecordValue) => vendor.enquiry_item_id === activeItem?.id) ?? [];
+  const selectedVendors =
+    detail.vendors?.filter((vendor: RecordValue) => vendor.enquiry_item_id === activeItem?.id) ?? [];
 
   useEffect(() => {
     if (!activeItem?.id || !activeItem.product_id) {
@@ -373,14 +401,23 @@ function EnquiryDetail({
   }, [activeItem?.id]);
 
   async function toggleVendor(companyId: string) {
-    const selected = new Set(candidates.filter((candidate) => candidate.selected).map((candidate) => candidate.company_id));
-    selected.has(companyId) ? selected.delete(companyId) : selected.add(companyId);
+    const selected = new Set(
+      candidates.filter((candidate) => candidate.selected).map((candidate) => candidate.company_id)
+    );
+    if (selected.has(companyId)) {
+      selected.delete(companyId);
+    } else {
+      selected.add(companyId);
+    }
     try {
-      const data = await workflowApi<{ records: RecordValue[] }>(`/api/enquiry-items/${activeItem.id}/vendors`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyIds: [...selected] })
-      });
+      const data = await workflowApi<{ records: RecordValue[] }>(
+        `/api/enquiry-items/${activeItem.id}/vendors`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ companyIds: [...selected] })
+        }
+      );
       setCandidates(data.records);
       await onRefresh();
     } catch (value) {
@@ -441,9 +478,17 @@ function EnquiryDetail({
             <span>{formatDate(detail.received_at)}</span>
           </div>
           <h3>{detail.customer_name}</h3>
-          <p>{[detail.customer_company, detail.customer_email, detail.external_reference].filter(Boolean).join(" · ")}</p>
+          <p>
+            {[detail.customer_company, detail.customer_email, detail.external_reference]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
         </div>
-        <select aria-label="Resolution" onChange={(event) => void updateResolution(event.target.value)} value={detail.resolution}>
+        <select
+          aria-label="Resolution"
+          onChange={(event) => void updateResolution(event.target.value)}
+          value={detail.resolution}
+        >
           <option value="open">Open</option>
           <option value="won">Won</option>
           <option value="lost">Lost</option>
@@ -480,10 +525,20 @@ function EnquiryDetail({
             <div className="item-product-summary">
               <span>Product</span>
               <strong>{getProductDisplay(activeItem).primary}</strong>
-              {getProductDisplay(activeItem).secondary ? <small>{getProductDisplay(activeItem).secondary}</small> : null}
+              {getProductDisplay(activeItem).secondary ? (
+                <small>{getProductDisplay(activeItem).secondary}</small>
+              ) : null}
             </div>
-            <div><span>CAS</span><strong>{activeItem.cas_number || "—"}</strong></div>
-            <div><span>Quantity</span><strong>{activeItem.quantities?.map((q: RecordValue) => `${q.quantity} ${q.unit}`).join(", ") || "—"}</strong></div>
+            <div>
+              <span>CAS</span>
+              <strong>{activeItem.cas_number || "—"}</strong>
+            </div>
+            <div>
+              <span>Quantity</span>
+              <strong>
+                {activeItem.quantities?.map((q: RecordValue) => `${q.quantity} ${q.unit}`).join(", ") || "—"}
+              </strong>
+            </div>
           </section>
 
           {activeItem.is_controlled ? (
@@ -498,7 +553,10 @@ function EnquiryDetail({
           ) : null}
 
           <div className="section-heading">
-            <div><p className="eyebrow">Supabase-derived network</p><h4>Vendor candidates</h4></div>
+            <div>
+              <p className="eyebrow">Supabase-derived network</p>
+              <h4>Vendor candidates</h4>
+            </div>
             <span>{candidates.length} available</span>
           </div>
           <div className="candidate-list">
@@ -514,8 +572,13 @@ function EnquiryDetail({
                 type="button"
               >
                 <span className="candidate-check">{candidate.selected ? <Check size={14} /> : null}</span>
-                <span><strong>{candidate.company_name}</strong><small>{candidate.contact_email}</small></span>
-                <span>{candidate.facility_count} facilit{candidate.facility_count === 1 ? "y" : "ies"}</span>
+                <span>
+                  <strong>{candidate.company_name}</strong>
+                  <small>{candidate.contact_email}</small>
+                </span>
+                <span>
+                  {candidate.facility_count} facilit{candidate.facility_count === 1 ? "y" : "ies"}
+                </span>
               </button>
             ))}
           </div>
@@ -523,12 +586,21 @@ function EnquiryDetail({
           {selectedVendors.length ? (
             <div className="sticky-action-bar">
               <div>
-                <strong>{selectedVendors.length} vendor{selectedVendors.length === 1 ? "" : "s"} selected</strong>
-                <span>{selectedVendors.filter((vendor: RecordValue) => vendor.dispatch_status === "sent").length} already sent</span>
+                <strong>
+                  {selectedVendors.length} vendor{selectedVendors.length === 1 ? "" : "s"} selected
+                </strong>
+                <span>
+                  {selectedVendors.filter((vendor: RecordValue) => vendor.dispatch_status === "sent").length}{" "}
+                  already sent
+                </span>
               </div>
               {activeItem.is_controlled ? (
                 <label className="acknowledgement">
-                  <input checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} type="checkbox" />
+                  <input
+                    checked={acknowledged}
+                    onChange={(event) => setAcknowledged(event.target.checked)}
+                    type="checkbox"
+                  />
                   I acknowledge the controlled-substance warning
                 </label>
               ) : null}
@@ -545,7 +617,12 @@ function EnquiryDetail({
 
           {selectedVendors.length ? (
             <div className="quote-list">
-              <div className="section-heading"><div><p className="eyebrow">Responses</p><h4>Vendor quotes</h4></div></div>
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Responses</p>
+                  <h4>Vendor quotes</h4>
+                </div>
+              </div>
               {selectedVendors.map((vendor: RecordValue) => (
                 <QuoteRow key={vendor.id} vendor={vendor} onError={onError} onSaved={onRefresh} />
               ))}
@@ -557,7 +634,15 @@ function EnquiryDetail({
   );
 }
 
-function QuoteRow({ vendor, onSaved, onError }: { vendor: RecordValue; onSaved: () => Promise<void>; onError: (value: string) => void }) {
+function QuoteRow({
+  vendor,
+  onSaved,
+  onError
+}: {
+  vendor: RecordValue;
+  onSaved: () => Promise<void>;
+  onError: (value: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     responseStatus: vendor.response_status || "awaiting",
@@ -593,8 +678,14 @@ function QuoteRow({ vendor, onSaved, onError }: { vendor: RecordValue; onSaved: 
       </div>
       <div>
         <StagePill stage={vendor.response_status || "awaiting"} />
-        {vendor.price ? <strong>{vendor.currency || ""} {vendor.price}</strong> : null}
-        {vendor.lead_time_days !== null && vendor.lead_time_days !== undefined ? <span>{vendor.lead_time_days} days</span> : null}
+        {vendor.price ? (
+          <strong>
+            {vendor.currency || ""} {vendor.price}
+          </strong>
+        ) : null}
+        {vendor.lead_time_days !== null && vendor.lead_time_days !== undefined ? (
+          <span>{vendor.lead_time_days} days</span>
+        ) : null}
       </div>
       <button className="ghost-button" onClick={() => setEditing(true)} type="button">
         <CircleDollarSign size={15} /> Record quote
@@ -602,18 +693,80 @@ function QuoteRow({ vendor, onSaved, onError }: { vendor: RecordValue; onSaved: 
       {editing ? (
         <div className="overlay">
           <form className="dialog quote-dialog" onSubmit={save}>
-            <div className="dialog-head"><div><p className="eyebrow">Vendor response</p><h3>{vendor.company_name}</h3></div><button className="close-button" onClick={() => setEditing(false)} type="button"><X size={18} /></button></div>
-            <div className="form-grid">
-              <Field label="Response"><select value={form.responseStatus} onChange={(e) => setForm({ ...form, responseStatus: e.target.value })}><option value="awaiting">Awaiting</option><option value="quoted">Quoted</option><option value="declined">Declined</option><option value="no_response">No response</option></select></Field>
-              <Field label="Outcome"><select value={form.outcome} onChange={(e) => setForm({ ...form, outcome: e.target.value })}><option value="pending">Pending</option><option value="shortlisted">Shortlisted</option><option value="selected">Selected</option><option value="rejected">Rejected</option></select></Field>
-              <Field label="Price"><input min="0" step="any" type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></Field>
-              <Field label="Currency"><input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} /></Field>
-              <Field label="Lead time (days)"><input min="0" type="number" value={form.leadTimeDays} onChange={(e) => setForm({ ...form, leadTimeDays: e.target.value })} /></Field>
-              <Field label="Packing"><input value={form.packing} onChange={(e) => setForm({ ...form, packing: e.target.value })} /></Field>
-              <Field label="HSN code"><input value={form.hsnCode} onChange={(e) => setForm({ ...form, hsnCode: e.target.value })} /></Field>
-              <Field label="Notes"><textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
+            <div className="dialog-head">
+              <div>
+                <p className="eyebrow">Vendor response</p>
+                <h3>{vendor.company_name}</h3>
+              </div>
+              <button className="close-button" onClick={() => setEditing(false)} type="button">
+                <X size={18} />
+              </button>
             </div>
-            <div className="dialog-actions dialog-footer"><button className="ghost-button" onClick={() => setEditing(false)} type="button">Cancel</button><button className="primary-button" type="submit">Save response</button></div>
+            <div className="form-grid">
+              <Field label="Response">
+                <select
+                  value={form.responseStatus}
+                  onChange={(e) => setForm({ ...form, responseStatus: e.target.value })}
+                >
+                  <option value="awaiting">Awaiting</option>
+                  <option value="quoted">Quoted</option>
+                  <option value="declined">Declined</option>
+                  <option value="no_response">No response</option>
+                </select>
+              </Field>
+              <Field label="Outcome">
+                <select value={form.outcome} onChange={(e) => setForm({ ...form, outcome: e.target.value })}>
+                  <option value="pending">Pending</option>
+                  <option value="shortlisted">Shortlisted</option>
+                  <option value="selected">Selected</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </Field>
+              <Field label="Price">
+                <input
+                  min="0"
+                  step="any"
+                  type="number"
+                  value={form.price}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })}
+                />
+              </Field>
+              <Field label="Currency">
+                <input
+                  value={form.currency}
+                  onChange={(e) => setForm({ ...form, currency: e.target.value })}
+                />
+              </Field>
+              <Field label="Lead time (days)">
+                <input
+                  min="0"
+                  type="number"
+                  value={form.leadTimeDays}
+                  onChange={(e) => setForm({ ...form, leadTimeDays: e.target.value })}
+                />
+              </Field>
+              <Field label="Packing">
+                <input value={form.packing} onChange={(e) => setForm({ ...form, packing: e.target.value })} />
+              </Field>
+              <Field label="HSN code">
+                <input value={form.hsnCode} onChange={(e) => setForm({ ...form, hsnCode: e.target.value })} />
+              </Field>
+              <Field label="Notes">
+                <textarea
+                  rows={3}
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                />
+              </Field>
+            </div>
+            <div className="dialog-actions dialog-footer">
+              <button className="ghost-button" onClick={() => setEditing(false)} type="button">
+                Cancel
+              </button>
+              <button className="primary-button" type="submit">
+                Save response
+              </button>
+            </div>
           </form>
         </div>
       ) : null}
@@ -621,26 +774,66 @@ function QuoteRow({ vendor, onSaved, onError }: { vendor: RecordValue; onSaved: 
   );
 }
 
-function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
-  const [header, setHeader] = useState({ customerName: "", customerEmail: "", customerCompany: "", externalReference: "", enquiryType: "sourcing", receivedAt: new Date().toISOString().slice(0, 10), notes: "" });
+function CreateEnquiryDialog({
+  onClose,
+  onCreated
+}: {
+  onClose: () => void;
+  onCreated: (id: string) => void;
+}) {
+  const [header, setHeader] = useState({
+    customerName: "",
+    customerEmail: "",
+    customerCompany: "",
+    externalReference: "",
+    enquiryType: "sourcing",
+    receivedAt: new Date().toISOString().slice(0, 10),
+    notes: ""
+  });
   const [items, setItems] = useState<EnquiryDraftItem[]>([{ ...EMPTY_ITEM }]);
   const [results, setResults] = useState<Record<number, RecordValue[]>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const productSearchTimers = useRef<Record<number, number>>({});
+  const productSearchControllers = useRef<Record<number, AbortController>>({});
+
+  useEffect(
+    () => () => {
+      Object.values(productSearchTimers.current).forEach((timer) => window.clearTimeout(timer));
+      Object.values(productSearchControllers.current).forEach((controller) => controller.abort());
+    },
+    []
+  );
 
   function updateItem(index: number, patch: Partial<EnquiryDraftItem>) {
-    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+    setItems((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item))
+    );
   }
 
-  async function searchProduct(index: number, value: string) {
+  function searchProduct(index: number, value: string) {
     updateItem(index, { productName: value, productId: "", productCode: "" });
-    if (value.trim().length < 2) return setResults((current) => ({ ...current, [index]: [] }));
-    try {
-      const data = await workflowApi<{ records: RecordValue[] }>(`/api/enquiry-products?search=${encodeURIComponent(value)}`);
-      setResults((current) => ({ ...current, [index]: data.records }));
-    } catch (value) {
-      setError(message(value));
+
+    window.clearTimeout(productSearchTimers.current[index]);
+    productSearchControllers.current[index]?.abort();
+
+    if (value.trim().length < 2) {
+      setResults((current) => ({ ...current, [index]: [] }));
+      return;
     }
+
+    const controller = new AbortController();
+    productSearchControllers.current[index] = controller;
+    productSearchTimers.current[index] = window.setTimeout(() => {
+      void workflowApi<{ records: RecordValue[] }>(
+        `/api/enquiry-products?search=${encodeURIComponent(value)}`,
+        { signal: controller.signal }
+      )
+        .then((data) => setResults((current) => ({ ...current, [index]: data.records })))
+        .catch((value) => {
+          if (!controller.signal.aborted) setError(message(value));
+        });
+    }, 220);
   }
 
   async function submit(event: FormEvent) {
@@ -675,13 +868,20 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
   }
 
   return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className="enquiry-dialog-overlay" />
         <Dialog.Content asChild>
           <form className="enquiry-dialog-content" onSubmit={submit}>
             <header className="enquiry-dialog-header">
-              <div className="enquiry-dialog-title-icon"><Plus size={20} /></div>
+              <div className="enquiry-dialog-title-icon">
+                <Plus size={20} />
+              </div>
               <div>
                 <p className="eyebrow">New workflow</p>
                 <Dialog.Title>Create enquiry</Dialog.Title>
@@ -695,7 +895,7 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
             </header>
 
             <div className="enquiry-dialog-body">
-              {error ? <p className="banner error">{error}</p> : null}
+              <StatusBanner variant="error">{error}</StatusBanner>
 
               <section className="enquiry-form-section">
                 <div className="enquiry-section-heading">
@@ -708,14 +908,54 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                   </div>
                 </div>
                 <div className="enquiry-customer-grid">
-                  <Field label="Customer name"><input required value={header.customerName} onChange={(e) => setHeader({ ...header, customerName: e.target.value })} /></Field>
-                  <Field label="Customer company"><input value={header.customerCompany} onChange={(e) => setHeader({ ...header, customerCompany: e.target.value })} /></Field>
-                  <Field label="Customer email"><input type="email" value={header.customerEmail} onChange={(e) => setHeader({ ...header, customerEmail: e.target.value })} /></Field>
-                  <Field label="External reference"><input value={header.externalReference} onChange={(e) => setHeader({ ...header, externalReference: e.target.value })} /></Field>
-                  <Field label="Received date"><input required type="date" value={header.receivedAt} onChange={(e) => setHeader({ ...header, receivedAt: e.target.value })} /></Field>
-                  <Field label="Enquiry type"><input value={header.enquiryType} onChange={(e) => setHeader({ ...header, enquiryType: e.target.value })} /></Field>
+                  <Field label="Customer name">
+                    <input
+                      required
+                      value={header.customerName}
+                      onChange={(e) => setHeader({ ...header, customerName: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Customer company">
+                    <input
+                      value={header.customerCompany}
+                      onChange={(e) => setHeader({ ...header, customerCompany: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Customer email">
+                    <input
+                      type="email"
+                      value={header.customerEmail}
+                      onChange={(e) => setHeader({ ...header, customerEmail: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="External reference">
+                    <input
+                      value={header.externalReference}
+                      onChange={(e) => setHeader({ ...header, externalReference: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Received date">
+                    <input
+                      required
+                      type="date"
+                      value={header.receivedAt}
+                      onChange={(e) => setHeader({ ...header, receivedAt: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Enquiry type">
+                    <input
+                      value={header.enquiryType}
+                      onChange={(e) => setHeader({ ...header, enquiryType: e.target.value })}
+                    />
+                  </Field>
                   <div className="enquiry-notes-field">
-                    <Field label="Notes"><textarea rows={3} value={header.notes} onChange={(e) => setHeader({ ...header, notes: e.target.value })} /></Field>
+                    <Field label="Notes">
+                      <textarea
+                        rows={3}
+                        value={header.notes}
+                        onChange={(e) => setHeader({ ...header, notes: e.target.value })}
+                      />
+                    </Field>
                   </div>
                 </div>
               </section>
@@ -726,10 +966,16 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                     <span>02</span>
                     <div>
                       <h4>Requested materials</h4>
-                      <p>{items.length} item{items.length === 1 ? "" : "s"} in this enquiry.</p>
+                      <p>
+                        {items.length} item{items.length === 1 ? "" : "s"} in this enquiry.
+                      </p>
                     </div>
                   </div>
-                  <button className="ghost-button" onClick={() => setItems([...items, { ...EMPTY_ITEM }])} type="button">
+                  <button
+                    className="ghost-button"
+                    onClick={() => setItems([...items, { ...EMPTY_ITEM }])}
+                    type="button"
+                  >
                     <Plus size={15} /> Add item
                   </button>
                 </div>
@@ -763,7 +1009,11 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                                 onChange={(e) => void searchProduct(index, e.target.value)}
                                 placeholder="Search by product name, code or CAS…"
                               />
-                              {item.productId ? <span className="selected-product-code">Product code: {item.productCode || item.productId}</span> : null}
+                              {item.productId ? (
+                                <span className="selected-product-code">
+                                  Product code: {item.productCode || item.productId}
+                                </span>
+                              ) : null}
                               {results[index]?.length ? (
                                 <div className="autocomplete-results">
                                   {results[index].map((product) => (
@@ -773,14 +1023,19 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                                         updateItem(index, {
                                           productId: product.id,
                                           productCode: product.product_code || product.id,
-                                          productName: product.product_name || `Product code: ${product.product_code || product.id}`,
+                                          productName:
+                                            product.product_name ||
+                                            `Product code: ${product.product_code || product.id}`,
                                           casNumber: product.cas_number || ""
                                         });
                                         setResults((current) => ({ ...current, [index]: [] }));
                                       }}
                                       type="button"
                                     >
-                                      <strong>{product.product_name || `Product code: ${product.product_code || product.id}`}</strong>
+                                      <strong>
+                                        {product.product_name ||
+                                          `Product code: ${product.product_code || product.id}`}
+                                      </strong>
                                       <span>
                                         Code: {product.product_code || product.id}
                                         {product.cas_number ? ` · CAS: ${product.cas_number}` : ""}
@@ -793,11 +1048,40 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                             </div>
                           </Field>
                         </div>
-                        <Field label="CAS number"><input value={item.casNumber} onChange={(e) => updateItem(index, { casNumber: e.target.value, productId: "" })} /></Field>
-                        <Field label="Quantity"><input min="0" step="any" type="number" value={item.quantity} onChange={(e) => updateItem(index, { quantity: e.target.value })} /></Field>
-                        <Field label="Unit"><select value={item.unit} onChange={(e) => updateItem(index, { unit: e.target.value })}><option value="g">g</option><option value="kg">kg</option><option value="MT">MT</option><option value="L">L</option><option value="KL">KL</option></select></Field>
+                        <Field label="CAS number">
+                          <input
+                            value={item.casNumber}
+                            onChange={(e) => updateItem(index, { casNumber: e.target.value, productId: "" })}
+                          />
+                        </Field>
+                        <Field label="Quantity">
+                          <input
+                            min="0"
+                            step="any"
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => updateItem(index, { quantity: e.target.value })}
+                          />
+                        </Field>
+                        <Field label="Unit">
+                          <select
+                            value={item.unit}
+                            onChange={(e) => updateItem(index, { unit: e.target.value })}
+                          >
+                            <option value="g">g</option>
+                            <option value="kg">kg</option>
+                            <option value="MT">MT</option>
+                            <option value="L">L</option>
+                            <option value="KL">KL</option>
+                          </select>
+                        </Field>
                         <div className="draft-remarks-field">
-                          <Field label="Remarks"><input value={item.remarks} onChange={(e) => updateItem(index, { remarks: e.target.value })} /></Field>
+                          <Field label="Remarks">
+                            <input
+                              value={item.remarks}
+                              onChange={(e) => updateItem(index, { remarks: e.target.value })}
+                            />
+                          </Field>
                         </div>
                         <div className="additional-quantities">
                           {item.additionalQuantities.map((quantity, quantityIndex) => (
@@ -811,8 +1095,11 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                                 value={quantity.quantity}
                                 onChange={(event) =>
                                   updateItem(index, {
-                                    additionalQuantities: item.additionalQuantities.map((entry, entryIndex) =>
-                                      entryIndex === quantityIndex ? { ...entry, quantity: event.target.value } : entry
+                                    additionalQuantities: item.additionalQuantities.map(
+                                      (entry, entryIndex) =>
+                                        entryIndex === quantityIndex
+                                          ? { ...entry, quantity: event.target.value }
+                                          : entry
                                     )
                                   })
                                 }
@@ -822,34 +1109,50 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
                                 value={quantity.unit}
                                 onChange={(event) =>
                                   updateItem(index, {
-                                    additionalQuantities: item.additionalQuantities.map((entry, entryIndex) =>
-                                      entryIndex === quantityIndex ? { ...entry, unit: event.target.value } : entry
+                                    additionalQuantities: item.additionalQuantities.map(
+                                      (entry, entryIndex) =>
+                                        entryIndex === quantityIndex
+                                          ? { ...entry, unit: event.target.value }
+                                          : entry
                                     )
                                   })
                                 }
                               >
-                                <option value="g">g</option><option value="kg">kg</option><option value="MT">MT</option><option value="L">L</option><option value="KL">KL</option>
+                                <option value="g">g</option>
+                                <option value="kg">kg</option>
+                                <option value="MT">MT</option>
+                                <option value="L">L</option>
+                                <option value="KL">KL</option>
                               </select>
                               <button
                                 aria-label={`Remove additional quantity ${quantityIndex + 1}`}
                                 onClick={() =>
                                   updateItem(index, {
-                                    additionalQuantities: item.additionalQuantities.filter((_, entryIndex) => entryIndex !== quantityIndex)
+                                    additionalQuantities: item.additionalQuantities.filter(
+                                      (_, entryIndex) => entryIndex !== quantityIndex
+                                    )
                                   })
                                 }
                                 type="button"
-                              ><X size={14} /></button>
+                              >
+                                <X size={14} />
+                              </button>
                             </div>
                           ))}
                           <button
                             className="add-quantity-button"
                             onClick={() =>
                               updateItem(index, {
-                                additionalQuantities: [...item.additionalQuantities, { quantity: "", unit: "kg" }]
+                                additionalQuantities: [
+                                  ...item.additionalQuantities,
+                                  { quantity: "", unit: "kg" }
+                                ]
                               })
                             }
                             type="button"
-                          ><Plus size={14} /> Add another quantity</button>
+                          >
+                            <Plus size={14} /> Add another quantity
+                          </button>
                         </div>
                       </div>
                     </section>
@@ -859,7 +1162,9 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
             </div>
 
             <footer className="enquiry-dialog-footer">
-              <button className="ghost-button" onClick={onClose} type="button">Cancel</button>
+              <button className="ghost-button" onClick={onClose} type="button">
+                Cancel
+              </button>
               <button className="primary-button" disabled={busy} type="submit">
                 {busy ? "Creating…" : "Create enquiry"}
               </button>
@@ -871,11 +1176,27 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
   );
 }
 
-function ImportEnquiriesDialog({ onClose, onImported }: { onClose: () => void; onImported: (count: number) => void }) {
+function ImportEnquiriesDialog({
+  onClose,
+  onImported
+}: {
+  onClose: () => void;
+  onImported: (count: number) => void;
+}) {
   const [rows, setRows] = useState<RecordValue[]>([]);
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const enquiryGroupCount = useMemo(
+    () =>
+      new Set(
+        rows.map((row, index) => {
+          const reference = String(row.externalReference ?? "").trim();
+          return reference || `row-${index}`;
+        })
+      ).size,
+    [rows]
+  );
 
   async function readFile(file: File | null) {
     if (!file) return;
@@ -885,7 +1206,15 @@ function ImportEnquiriesDialog({ onClose, onImported }: { onClose: () => void; o
       const sheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
       const raw = XLSX.utils.sheet_to_json<RecordValue>(sheet, { defval: "", raw: false });
       const normalized = raw.map((row) => {
-        const byKey = Object.fromEntries(Object.entries(row).map(([key, value]) => [key.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_"), value]));
+        const byKey = Object.fromEntries(
+          Object.entries(row).map(([key, value]) => [
+            key
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "_"),
+            value
+          ])
+        );
         return {
           externalReference: byKey.external_reference || byKey.reference,
           customerName: byKey.customer_name || byKey.customer,
@@ -927,18 +1256,53 @@ function ImportEnquiriesDialog({ onClose, onImported }: { onClose: () => void; o
   return (
     <div className="overlay">
       <section className="dialog import-dialog">
-        <div className="dialog-head"><div><p className="eyebrow">Supabase import</p><h3>Import enquiries</h3><p className="dialog-copy">Rows with the same external reference become one multi-product enquiry.</p></div><button className="close-button" onClick={onClose} type="button"><X size={18} /></button></div>
-        {error ? <p className="banner error">{error}</p> : null}
-        <label className="upload-zone"><input accept=".xlsx,.xls" onChange={(event) => void readFile(event.target.files?.[0] ?? null)} type="file" /><Upload size={24} /><strong>{fileName || "Choose Excel file"}</strong><span>Expected: customer, date, product/CAS, quantity and UOM. External reference is optional.</span></label>
-        {rows.length ? <div className="import-preview"><strong>{rows.length} rows ready</strong><span>{new Set(rows.map((row) => row.externalReference || crypto.randomUUID())).size} enquiry groups</span></div> : null}
-        <div className="dialog-actions dialog-footer"><button className="ghost-button" onClick={onClose} type="button">Cancel</button><button className="primary-button" disabled={!rows.length || busy} onClick={() => void submit()} type="button">{busy ? "Importing…" : `Import ${rows.length || ""} rows`}</button></div>
+        <div className="dialog-head">
+          <div>
+            <p className="eyebrow">Supabase import</p>
+            <h3>Import enquiries</h3>
+            <p className="dialog-copy">
+              Rows with the same external reference become one multi-product enquiry.
+            </p>
+          </div>
+          <button className="close-button" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </div>
+        <StatusBanner variant="error">{error}</StatusBanner>
+        <label className="upload-zone">
+          <input
+            accept=".xlsx,.xls"
+            onChange={(event) => void readFile(event.target.files?.[0] ?? null)}
+            type="file"
+          />
+          <Upload size={24} />
+          <strong>{fileName || "Choose Excel file"}</strong>
+          <span>
+            Expected: customer, date, product/CAS, quantity and UOM. External reference is optional.
+          </span>
+        </label>
+        {rows.length ? (
+          <div className="import-preview">
+            <strong>{rows.length} rows ready</strong>
+            <span>{enquiryGroupCount} enquiry groups</span>
+          </div>
+        ) : null}
+        <div className="dialog-actions dialog-footer">
+          <button className="ghost-button" onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button
+            className="primary-button"
+            disabled={!rows.length || busy}
+            onClick={() => void submit()}
+            type="button"
+          >
+            {busy ? "Importing…" : `Import ${rows.length || ""} rows`}
+          </button>
+        </div>
       </section>
     </div>
   );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="field"><span>{label}</span>{children}</label>;
 }
 
 function getProductDisplay(item: RecordValue) {
@@ -956,7 +1320,10 @@ function getProductDisplay(item: RecordValue) {
 }
 
 function StagePill({ stage }: { stage: string }) {
-  const key = String(stage || "").toLowerCase().replaceAll(" ", "-").replaceAll("_", "-");
+  const key = String(stage || "")
+    .toLowerCase()
+    .replaceAll(" ", "-")
+    .replaceAll("_", "-");
   return <span className={`stage-pill stage-${key}`}>{stage || "Unknown"}</span>;
 }
 
@@ -964,56 +1331,17 @@ function SimpleBars({ rows }: { rows: RecordValue[] }) {
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
   return rows.length ? (
     <div className="simple-bars">
-      {rows.map((row) => <div className="simple-bar" key={row.label}><span>{row.label}</span><div><i style={{ width: `${Math.max(5, (Number(row.value) / max) * 100)}%` }} /></div><strong>{row.value}</strong></div>)}
+      {rows.map((row) => (
+        <div className="simple-bar" key={row.label}>
+          <span>{row.label}</span>
+          <div>
+            <i style={{ width: `${Math.max(5, (Number(row.value) / max) * 100)}%` }} />
+          </div>
+          <strong>{row.value}</strong>
+        </div>
+      ))}
     </div>
-  ) : <div className="empty-state">No enquiry data yet.</div>;
-}
-
-async function workflowApi<T = unknown>(url: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  const token = await window.Clerk?.session?.getToken();
-  if (!token) throw new Error("You must be signed in to continue.");
-  headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(url, { ...init, headers });
-  const data = response.status === 204 ? null : await response.json();
-  if (!response.ok) throw new Error(data?.error ?? "Request failed.");
-  return data as T;
-}
-
-function message(value: unknown) {
-  return value instanceof Error ? value.message : "Something went wrong.";
-}
-
-function formatDate(value: unknown) {
-  const date = parseDateValue(value);
-  if (!date) return "—";
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  }).format(date);
-}
-
-function formatDateTime(value: unknown) {
-  const date = parseDateValue(value);
-  if (!date) return "—";
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(date);
-}
-
-function parseDateValue(value: unknown) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
-  }
-
-  const raw = String(value).trim();
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw)
-    ? new Date(`${raw}T00:00:00`)
-    : new Date(raw);
-  return Number.isNaN(date.getTime()) ? null : date;
+  ) : (
+    <div className="empty-state">No enquiry data yet.</div>
+  );
 }

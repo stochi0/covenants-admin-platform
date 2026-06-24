@@ -21,10 +21,10 @@ CLERK_WEBHOOK_SECRET=...
 Run the app and API together:
 
 ```bash
-npm install
-npm run db:migrate
-npm run db:seed:controlled
-npm run dev
+pnpm install
+pnpm db:migrate
+pnpm db:seed:controlled
+pnpm dev
 ```
 
 `db:seed:controlled` is a one-time, idempotent migration from the legacy Narcotics workbook into
@@ -91,7 +91,10 @@ In Clerk, keep using the shared Capillia/Covenants production project. Add `admi
 ## Verification
 
 ```bash
-npm run build
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
 ```
 
 Manual checks:

@@ -1,14 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useSignIn } from "@clerk/react/legacy";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  KeyRound,
-  LockKeyhole,
-  LogIn,
-  Mail,
-  X
-} from "lucide-react";
+import { ArrowLeft, CheckCircle2, KeyRound, LockKeyhole, LogIn, Mail, X } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
@@ -37,9 +29,11 @@ function getClerkErrorMessage(error: unknown): string {
     "errors" in error &&
     Array.isArray((error as { errors?: unknown }).errors)
   ) {
-    const [firstError] = (error as {
-      errors: Array<{ longMessage?: string; message?: string }>;
-    }).errors;
+    const [firstError] = (
+      error as {
+        errors: Array<{ longMessage?: string; message?: string }>;
+      }
+    ).errors;
     return firstError?.longMessage ?? firstError?.message ?? "Unable to sign in.";
   }
 
@@ -61,13 +55,7 @@ function Field({ children, label }: { children: ReactNode; label: string }) {
   );
 }
 
-function StatusMessage({
-  message,
-  tone
-}: {
-  message: string | null;
-  tone: "error" | "success";
-}) {
+function StatusMessage({ message, tone }: { message: string | null; tone: "error" | "success" }) {
   if (!message) {
     return null;
   }
@@ -229,9 +217,7 @@ export default function SignInDialog() {
           </Dialog.Close>
 
           <header className="auth-flow-header">
-            <div className="auth-flow-icon">
-              {isResetFlow ? <KeyRound size={20} /> : <LogIn size={20} />}
-            </div>
+            <div className="auth-flow-icon">{isResetFlow ? <KeyRound size={20} /> : <LogIn size={20} />}</div>
             <div>
               <Dialog.Title>{copy.title}</Dialog.Title>
               <Dialog.Description>{copy.description}</Dialog.Description>
@@ -337,10 +323,7 @@ export default function SignInDialog() {
             <form className="auth-form-shell" onSubmit={handleResetSubmit}>
               <div className="auth-flow-body">
                 <StatusMessage
-                  message={
-                    message ??
-                    "Check your inbox for the reset code before choosing a new password."
-                  }
+                  message={message ?? "Check your inbox for the reset code before choosing a new password."}
                   tone="success"
                 />
 

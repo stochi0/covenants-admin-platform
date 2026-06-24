@@ -101,7 +101,10 @@ async function buildSearchFilters(table: TableMeta, search: string): Promise<str
   return filters;
 }
 
-async function findForeignKeySearchMatches(column: TableMeta["columns"][number], search: string): Promise<string[]> {
+async function findForeignKeySearchMatches(
+  column: TableMeta["columns"][number],
+  search: string
+): Promise<string[]> {
   if (!column.foreignKey) {
     return [];
   }
@@ -131,31 +134,28 @@ async function findForeignKeySearchMatches(column: TableMeta["columns"][number],
   }
 
   const rows = (data ?? []) as RecordInput[];
-  return [...new Set(rows.map((row) => String(row[column.foreignKey!.referencesColumn] ?? ""))).values()]
-    .filter(Boolean);
+  return [
+    ...new Set(rows.map((row) => String(row[column.foreignKey!.referencesColumn] ?? ""))).values()
+  ].filter(Boolean);
 }
 
-export async function createRecord(
-  tableName: string,
-  record: RecordInput
-): Promise<Record<string, unknown>> {
+export async function createRecord(tableName: string, record: RecordInput): Promise<Record<string, unknown>> {
   const table = getTableOrThrow(tableName);
 
   if (table.readOnly) {
     throw new Error(`${table.label} is read-only.`);
   }
 
-  const payload = await prepareRecordForPersist(table, prepareCreatePayload(table, sanitizeRecord(table, record, "create"), record));
+  const payload = await prepareRecordForPersist(
+    table,
+    prepareCreatePayload(table, sanitizeRecord(table, record, "create"), record)
+  );
   const restoredRecord = await restoreDeletedRecordForCreate(table, payload);
   if (restoredRecord) {
     return restoredRecord;
   }
 
-  const { data, error } = await supabase
-    .from(table.name)
-    .insert(payload)
-    .select("*")
-    .single();
+  const { data, error } = await supabase.from(table.name).insert(payload).select("*").single();
 
   if (error) {
     throw new Error(error.message);
@@ -164,7 +164,11 @@ export async function createRecord(
   return data;
 }
 
-function prepareCreatePayload(table: TableMeta, payload: RecordInput, originalRecord: RecordInput): RecordInput {
+function prepareCreatePayload(
+  table: TableMeta,
+  payload: RecordInput,
+  originalRecord: RecordInput
+): RecordInput {
   if (table.name === "products" && isBlankImportValue(payload.id)) {
     payload.id = createProductId(originalRecord);
   }
@@ -172,10 +176,7 @@ function prepareCreatePayload(table: TableMeta, payload: RecordInput, originalRe
   return payload;
 }
 
-export async function updateRecord(
-  tableName: string,
-  record: RecordInput
-): Promise<Record<string, unknown>> {
+export async function updateRecord(tableName: string, record: RecordInput): Promise<Record<string, unknown>> {
   const table = getTableOrThrow(tableName);
 
   if (table.readOnly) {
@@ -203,10 +204,7 @@ export async function deleteRecord(tableName: string, record: RecordInput): Prom
       payload.updated_at = new Date().toISOString();
     }
 
-    let query = supabase
-      .from(table.name)
-      .update(payload)
-      .select(table.primaryKeys.join(","));
+    let query = supabase.from(table.name).update(payload).select(table.primaryKeys.join(","));
 
     for (const [column, value] of Object.entries(keys)) {
       query = query.eq(column, value as never);
@@ -250,10 +248,7 @@ async function updateRecordByKeys(
   return data;
 }
 
-export async function importRecords(
-  tableName: string,
-  rows: RecordInput[]
-): Promise<ImportResponse> {
+export async function importRecords(tableName: string, rows: RecordInput[]): Promise<ImportResponse> {
   const table = getTableOrThrow(tableName);
   const filteredRows = rows.filter((row) => !isRowEmpty(row));
   let created = 0;
@@ -314,7 +309,9 @@ async function restoreDeletedRecordForCreate(
 }
 
 async function findExistingCreateRecord(table: TableMeta, payload: RecordInput): Promise<RecordInput | null> {
-  const matcher = hasPrimaryKeys(table, payload) ? table.primaryKeys : getImportMatcherForRecord(table, payload);
+  const matcher = hasPrimaryKeys(table, payload)
+    ? table.primaryKeys
+    : getImportMatcherForRecord(table, payload);
   if (!matcher) {
     return null;
   }
@@ -366,7 +363,11 @@ async function sanitizeImportRecord(table: TableMeta, record: RecordInput): Prom
 }
 
 async function prepareRecordForPersist(table: TableMeta, payload: RecordInput): Promise<RecordInput> {
-  if (table.name === "facilities" && isBlankImportValue(payload.region_id) && !isBlankImportValue(payload.address)) {
+  if (
+    table.name === "facilities" &&
+    isBlankImportValue(payload.region_id) &&
+    !isBlankImportValue(payload.address)
+  ) {
     const inferredRegionId = await inferRegionIdFromAddress(payload.address);
     if (inferredRegionId) {
       payload.region_id = inferredRegionId;
@@ -400,7 +401,10 @@ export async function getOptions(
     .map((column) => column.name);
   const columns = [...new Set([primaryKey, displayColumn, ...searchColumns])];
 
-  let query = supabase.from(table.name).select(columns.join(",")).limit(options.limit ?? 50);
+  let query = supabase
+    .from(table.name)
+    .select(columns.join(","))
+    .limit(options.limit ?? 50);
   if (hasDeletedAtColumn(table) && ids.length === 0) {
     query = query.is("deleted_at", null);
   }
@@ -444,13 +448,9 @@ async function getProductFacilityRelationOptions(
   if (ids.length > 0) {
     query = query.in("id", ids);
   } else if (trimmedSearch) {
-    query = query
-      .is("deleted_at", null)
-      .ilike("cas_number", `%${escapeForIlike(trimmedSearch)}%`);
+    query = query.is("deleted_at", null).ilike("cas_number", `%${escapeForIlike(trimmedSearch)}%`);
   } else {
-    query = query
-      .is("deleted_at", null)
-      .not("cas_number", "is", null);
+    query = query.is("deleted_at", null).not("cas_number", "is", null);
   }
 
   const { data, error } = await query;
@@ -485,14 +485,8 @@ export function getTables() {
 
 export async function getFacilityRelations(facilityId: string): Promise<FacilityRelationsResponse> {
   const [chemistries, products, accreditations] = await Promise.all([
-    supabase
-      .from("facility_chemistries")
-      .select("chemistry_id")
-      .eq("facility_id", facilityId),
-    supabase
-      .from("facility_products")
-      .select("product_id,is_primary")
-      .eq("facility_id", facilityId),
+    supabase.from("facility_chemistries").select("chemistry_id").eq("facility_id", facilityId),
+    supabase.from("facility_products").select("product_id,is_primary").eq("facility_id", facilityId),
     supabase
       .from("facility_accreditations")
       .select("accreditation_id,awarding_body,certificate_number,awarded_at,expires_at")
@@ -521,13 +515,15 @@ export async function getFacilityRelations(facilityId: string): Promise<Facility
         isPrimary: Boolean(typed.is_primary)
       };
     }),
-    accreditations: ((accreditations.data ?? []) as Array<{
-      accreditation_id: unknown;
-      awarding_body: unknown;
-      certificate_number: unknown;
-      awarded_at: unknown;
-      expires_at: unknown;
-    }>).map((row) => {
+    accreditations: (
+      (accreditations.data ?? []) as Array<{
+        accreditation_id: unknown;
+        awarding_body: unknown;
+        certificate_number: unknown;
+        awarded_at: unknown;
+        expires_at: unknown;
+      }>
+    ).map((row) => {
       const typed = row as {
         accreditation_id: unknown;
         awarding_body: unknown;
@@ -654,12 +650,7 @@ function sanitizeRecord(
       continue;
     }
 
-    const value = normalizeValue(
-      record[column.name],
-      column.kind,
-      column.nullable,
-      column.hasDefault
-    );
+    const value = normalizeValue(record[column.name], column.kind, column.nullable, column.hasDefault);
 
     if (value === undefined) {
       continue;
@@ -859,10 +850,7 @@ async function resolveForeignKeyImportValue(
       continue;
     }
 
-    let query = supabase
-      .from(referencedTable.name)
-      .select(column.foreignKey.referencesColumn)
-      .limit(2);
+    let query = supabase.from(referencedTable.name).select(column.foreignKey.referencesColumn).limit(2);
 
     if (candidateColumn.kind === "text" || candidateColumn.kind === "custom") {
       query = query.ilike(candidateColumnName, String(value).trim());
@@ -899,14 +887,13 @@ async function resolveForeignKeyImportValue(
 }
 
 function getForeignKeyLookupColumns(referencedTable: TableMeta, referenceColumn: string): string[] {
-  const singleColumnMatchers = (referencedTable.importMatchers ?? []).filter((matcher) => matcher.length === 1).flat();
+  const singleColumnMatchers = (referencedTable.importMatchers ?? [])
+    .filter((matcher) => matcher.length === 1)
+    .flat();
   return [...new Set([referenceColumn, referencedTable.displayColumn, ...singleColumnMatchers])];
 }
 
-function normalizeLookupValue(
-  kind: TableMeta["columns"][number]["kind"],
-  value: unknown
-): unknown {
+function normalizeLookupValue(kind: TableMeta["columns"][number]["kind"], value: unknown): unknown {
   if (kind === "number") {
     const numberValue = typeof value === "number" ? value : Number(value);
     return Number.isNaN(numberValue) ? value : numberValue;
@@ -931,7 +918,10 @@ function isUuidLike(value: unknown): boolean {
 }
 
 function normalizeTextValue(value: string): string {
-  return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  return value
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function createProductId(record: RecordInput): string {
@@ -1102,7 +1092,12 @@ function buildForeignImportCreatePayload(
     return null;
   }
 
-  const normalizedValue = normalizeValue(value, sourceColumn.kind, sourceColumn.nullable, sourceColumn.hasDefault);
+  const normalizedValue = normalizeValue(
+    value,
+    sourceColumn.kind,
+    sourceColumn.nullable,
+    sourceColumn.hasDefault
+  );
   if (normalizedValue === undefined || isBlankImportValue(normalizedValue)) {
     return null;
   }
@@ -1171,11 +1166,7 @@ function normalizeValue(
   return typeof value === "string" ? normalizeTextValue(value) : value;
 }
 
-function createOptionLabel(
-  row: Record<string, unknown>,
-  primaryKey: string,
-  displayColumn: string
-): string {
+function createOptionLabel(row: Record<string, unknown>, primaryKey: string, displayColumn: string): string {
   const displayValue = String(row[displayColumn] ?? "");
 
   if (displayValue) {
@@ -1197,16 +1188,6 @@ function stringifyOptionMeta(value: unknown): string | null {
 
 function escapeForIlike(value: string) {
   return value.replace(/[%_,]/g, "");
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  const batches: T[][] = [];
-
-  for (let index = 0; index < items.length; index += size) {
-    batches.push(items.slice(index, index + size));
-  }
-
-  return batches;
 }
 
 function isRowEmpty(row: RecordInput): boolean {

@@ -13,7 +13,7 @@ import {
   listRecords,
   upsertFacilityRelations,
   updateRecord
-} from "./data.js";
+} from "./modules/records.js";
 import { requireAdmin, verifyClerkHeaders, type AuthenticatedAdminRequest } from "./auth.js";
 import {
   createEnquiry,
@@ -28,8 +28,8 @@ import {
   sendDispatches,
   updateEnquiryResolution,
   upsertQuote
-} from "./enquiries.js";
-import { upsertUserProfile } from "./users.js";
+} from "./modules/workflow.js";
+import { upsertUserProfile } from "./modules/users.js";
 
 dotenv.config();
 
@@ -276,7 +276,10 @@ app.get("/api/options/:table", async (req, res) => {
     const variant = typeof req.query.variant === "string" ? req.query.variant : undefined;
     const ids =
       typeof req.query.ids === "string"
-        ? req.query.ids.split(",").map((id) => id.trim()).filter(Boolean)
+        ? req.query.ids
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean)
         : undefined;
     const data = await getOptions(req.params.table, { ids, search, limit, variant });
     res.json(data);

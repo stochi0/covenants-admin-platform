@@ -23,7 +23,10 @@ try {
   `);
 
   const migrationDirectory = path.resolve("db/migrations");
-  const migrationNames = fs.readdirSync(migrationDirectory).filter((name) => name.endsWith(".sql")).sort();
+  const migrationNames = fs
+    .readdirSync(migrationDirectory)
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
   const applied = await pool.query("select name from public.admin_schema_migrations");
   const appliedNames = new Set(applied.rows.map((row) => row.name));
 

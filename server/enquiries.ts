@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import type { PoolClient } from "pg";
 
 import type { AdminUser } from "./auth.js";
+import { enquiryConfig } from "./config.js";
 import { getPool } from "./supabase.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -44,7 +45,7 @@ interface ImportRow {
   remarks?: string;
 }
 
-const DEFAULT_CC = ["alpesh@covenantspc.com", "vivek@covenantspc.com", "devesh@covenantspc.com"];
+const DEFAULT_CC = enquiryConfig.defaultCcEmails;
 
 export async function listEnquiries(options: {
   limit: number;
@@ -107,10 +108,7 @@ export async function listEnquiries(options: {
 }
 
 export async function getEnquiry(id: string) {
-  const enquiryResult = await getPool().query(
-    `select * from public.enquiry_workflow where id = $1`,
-    [id]
-  );
+  const enquiryResult = await getPool().query(`select * from public.enquiry_workflow where id = $1`, [id]);
   const enquiry = enquiryResult.rows[0];
   if (!enquiry) {
     throw new Error("Enquiry not found.");
@@ -388,11 +386,13 @@ export async function sendDispatches(
   );
   const sentIds = new Set(sentBefore.rows.map((row) => row.enquiry_vendor_id));
   const pendingIds = uniqueIds.filter((id) => !sentIds.has(id));
-  const results: Array<{ id: string; status: "sent" | "failed"; error?: string }> = [...sentIds].map((id) => ({
-    id,
-    status: "failed",
-    error: "This vendor has already received the enquiry."
-  }));
+  const results: Array<{ id: string; status: "sent" | "failed"; error?: string }> = [...sentIds].map(
+    (id) => ({
+      id,
+      status: "failed",
+      error: "This vendor has already received the enquiry."
+    })
+  );
   if (!pendingIds.length) {
     return { results, sent: 0, failed: results.length };
   }
@@ -435,7 +435,11 @@ export async function sendDispatches(
   for (const row of source.rows) {
     const recipients = parseEmails(row.contact_email);
     if (!recipients.length) {
-      results.push({ id: row.enquiry_vendor_id, status: "failed", error: "Vendor has no valid email address." });
+      results.push({
+        id: row.enquiry_vendor_id,
+        status: "failed",
+        error: "Vendor has no valid email address."
+      });
       continue;
     }
 
@@ -508,9 +512,7 @@ export async function sendDispatches(
 
 export async function listDispatches(options: { limit: number; offset: number; status?: string }) {
   const params: unknown[] = [];
-  const where = options.status
-    ? (params.push(options.status), `where ed.status = $${params.length}`)
-    : "";
+  const where = options.status ? (params.push(options.status), `where ed.status = $${params.length}`) : "";
   const count = await getPool().query<{ count: string }>(
     `select count(*)::text as count from public.enquiry_dispatches ed ${where}`,
     params
@@ -737,7 +739,8 @@ function renderEnquiryEmail(input: {
 
 function validateEnquiryInput(input: EnquiryInput) {
   if (!input.customerName?.trim()) throw new Error("Customer name is required.");
-  if (!Array.isArray(input.items) || input.items.length === 0) throw new Error("At least one enquiry item is required.");
+  if (!Array.isArray(input.items) || input.items.length === 0)
+    throw new Error("At least one enquiry item is required.");
   for (const item of input.items) {
     if (!item.productId && !clean(item.productName) && !clean(item.casNumber)) {
       throw new Error("Each enquiry item needs a product, product name, or CAS number.");
@@ -746,10 +749,14 @@ function validateEnquiryInput(input: EnquiryInput) {
 }
 
 function parseEmails(value: unknown) {
-  return [...new Set(String(value ?? "")
-    .split(/[;,]/)
-    .map((email) => email.trim().toLowerCase())
-    .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))];
+  return [
+    ...new Set(
+      String(value ?? "")
+        .split(/[;,]/)
+        .map((email) => email.trim().toLowerCase())
+        .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    )
+  ];
 }
 
 function normalizeCas(value: unknown) {

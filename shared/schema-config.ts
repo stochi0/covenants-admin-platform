@@ -86,12 +86,22 @@ export const schemaTables: TableMeta[] = [
   {
     name: "facilities",
     label: "Facilities",
-    description: "Manage facilities, availability, capacity, and linked products, chemistries, and accreditations.",
+    description:
+      "Manage facilities, availability, capacity, and linked products, chemistries, and accreditations.",
     primaryKeys: ["id"],
     importMatchers: [["company_id", "name"]],
     displayColumn: "name",
     searchableColumns: ["company_id", "name", "address", "region_id"],
-    listColumns: ["name", "company_id", "address", "region_id", "capacity_kl", "latitude", "longitude", "is_active"],
+    listColumns: [
+      "name",
+      "company_id",
+      "address",
+      "region_id",
+      "capacity_kl",
+      "latitude",
+      "longitude",
+      "is_active"
+    ],
     columns: [
       prefixedPrimaryKey,
       column("company_id", {
@@ -287,7 +297,14 @@ export const schemaTables: TableMeta[] = [
     importMatchers: [["facility_id", "accreditation_id"]],
     displayColumn: "awarding_body",
     searchableColumns: ["facility_id", "accreditation_id", "awarding_body", "certificate_number"],
-    listColumns: ["awarding_body", "facility_id", "accreditation_id", "certificate_number", "awarded_at", "expires_at"],
+    listColumns: [
+      "awarding_body",
+      "facility_id",
+      "accreditation_id",
+      "certificate_number",
+      "awarded_at",
+      "expires_at"
+    ],
     columns: [
       column("facility_id", {
         label: "Facility",

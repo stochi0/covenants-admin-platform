@@ -32,7 +32,7 @@ type WebhookHeaders = Record<string, string | string[] | undefined>;
 
 function readHeader(headers: WebhookHeaders, name: string): string {
   const value = headers[name] ?? headers[name.toLowerCase()];
-  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
 function toSvixHeaders(headers: WebhookHeaders): Record<string, string> {
@@ -45,7 +45,8 @@ function toSvixHeaders(headers: WebhookHeaders): Record<string, string> {
 
 function profileFromEvent(data: ClerkUserEventData): UserProfile {
   const primaryEmail =
-    data.email_addresses.find((email) => email.id === data.primary_email_address_id) ?? data.email_addresses[0];
+    data.email_addresses.find((email) => email.id === data.primary_email_address_id) ??
+    data.email_addresses[0];
 
   if (!primaryEmail?.email_address) {
     throw new Error("Clerk webhook user does not have an email address.");
@@ -67,7 +68,9 @@ function isUserEvent(
   return event.type === "user.created" || event.type === "user.updated";
 }
 
-function isDeletedUserEvent(event: ClerkWebhookEvent): event is Extract<ClerkWebhookEvent, { type: "user.deleted" }> {
+function isDeletedUserEvent(
+  event: ClerkWebhookEvent
+): event is Extract<ClerkWebhookEvent, { type: "user.deleted" }> {
   return event.type === "user.deleted";
 }
 
