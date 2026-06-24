@@ -1,7 +1,7 @@
 import { Show, SignOutButton, useAuth, useUser } from "@clerk/react";
 import { LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import { Component, useEffect, useState } from "react";
+import type { ErrorInfo, ReactNode } from "react";
 import AdminConsole from "./AdminConsole";
 import SignInDialog from "./SignInDialog";
 
@@ -165,7 +165,50 @@ function AdminGate() {
     );
   }
 
-  return <AdminConsole adminUser={adminUser} onAdminUserChange={setAdminUser} />;
+  return (
+    <AdminConsoleErrorBoundary>
+      <AdminConsole adminUser={adminUser} onAdminUserChange={setAdminUser} />
+    </AdminConsoleErrorBoundary>
+  );
+}
+
+class AdminConsoleErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Admin console render failed:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <AuthScreen
+          action={
+            <button
+              className="auth-primary-button auth-trigger auth-state-action"
+              onClick={() => window.location.reload()}
+              type="button"
+            >
+              Reload admin console
+            </button>
+          }
+          eyebrow="Display Error"
+          title="The admin console could not be displayed"
+          message="Your data is safe. Reload the page to return to the admin console."
+          variant="error"
+        />
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 function AuthScreen({
