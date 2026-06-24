@@ -175,6 +175,12 @@ export interface VendorCandidatesResponse {
   records: ApiRecord[];
 }
 
+export interface DispatchSendRequest {
+  enquiryVendorIds: string[];
+  controlledAcknowledged: boolean;
+  recipientEmails?: Record<string, string[]>;
+}
+
 export interface DispatchSendResponse {
   sent: number;
   failed: number;

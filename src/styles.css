@@ -2269,11 +2269,8 @@ tbody tr:hover .actions-cell {
 }
 
 .candidate-row {
-  width: 100%;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
+  gap: 8px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -2286,12 +2283,32 @@ tbody tr:hover .actions-cell {
   background: var(--accent-surface);
 }
 
-.candidate-row > span:nth-child(2) {
+.candidate-row-main {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.candidate-row-main:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.candidate-row-main > span:nth-child(2) {
   min-width: 0;
   display: grid;
 }
 
-.candidate-row small {
+.candidate-row-main small {
   color: var(--muted);
 }
 
@@ -2308,6 +2325,37 @@ tbody tr:hover .actions-cell {
 
 .candidate-row.selected .candidate-check {
   background: var(--accent);
+}
+
+.candidate-email-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  padding: 0 0 0 32px;
+}
+
+.candidate-email-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.candidate-email-option {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.candidate-email-option input {
+  margin: 0;
 }
 
 .sticky-action-bar {
@@ -3553,11 +3601,11 @@ tbody tr:hover .actions-cell {
     justify-items: end;
   }
 
-  .candidate-row {
+  .candidate-row-main {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .candidate-row > span:last-child {
+  .candidate-row-main > span:last-child {
     grid-column: 1 / -1;
   }
 
@@ -3790,14 +3838,18 @@ tbody tr:hover .actions-cell {
     max-width: 72vw;
   }
 
-  .candidate-row,
+  .candidate-row-main,
   .quote-row {
     grid-template-columns: 1fr;
   }
 
-  .candidate-row > span:last-child,
+  .candidate-row-main > span:last-child,
   .quote-row .ghost-button {
     grid-column: auto;
+  }
+
+  .candidate-email-picker {
+    padding-left: 0;
   }
 
   .sticky-action-bar {

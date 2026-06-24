@@ -65,6 +65,17 @@ function useDebouncedValue(value: string, delayMs: number) {
   return debounced;
 }
 
+function parseContactEmails(value: unknown) {
+  return [
+    ...new Set(
+      String(value ?? "")
+        .split(/[;,]/)
+        .map((email) => email.trim().toLowerCase())
+        .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    )
+  ];
+}
+
 export function OverviewWorkspace({ onOpenEnquiries }: { onOpenEnquiries: () => void }) {
   const { data, error } = useDashboardQuery();
 
@@ -402,6 +413,7 @@ function EnquiryDetail({
   const [vendorSaving, setVendorSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [emailSelections, setEmailSelections] = useState<Record<string, string[]>>({});
   const activeItem = detail.items?.find((item: RecordValue) => item.id === activeItemId) ?? detail.items?.[0];
   const selectedVendors =
     detail.vendors?.filter((vendor: RecordValue) => vendor.enquiry_item_id === activeItem?.id) ?? [];
@@ -429,6 +441,39 @@ function EnquiryDetail({
   useEffect(() => {
     if (candidateQuery.error) onError(message(candidateQuery.error));
   }, [candidateQuery.error, onError]);
+
+  useEffect(() => {
+    setEmailSelections((current) => {
+      const next: Record<string, string[]> = {};
+      for (const candidate of candidates) {
+        if (!candidate.selected || !candidate.enquiry_vendor_id) continue;
+        const vendorId = String(candidate.enquiry_vendor_id);
+        const available = parseContactEmails(candidate.contact_email);
+        const existing = (current[vendorId] ?? []).filter((email) => available.includes(email));
+        next[vendorId] = existing.length ? existing : available;
+      }
+      return next;
+    });
+  }, [candidates, activeItem?.id]);
+
+  function toggleVendorEmail(vendorId: string, email: string) {
+    setEmailSelections((current) => {
+      const selected = new Set(current[vendorId] ?? []);
+      if (selected.has(email)) {
+        if (selected.size <= 1) return current;
+        selected.delete(email);
+      } else {
+        selected.add(email);
+      }
+      return { ...current, [vendorId]: [...selected] };
+    });
+  }
+
+  const pendingVendorIds = candidates
+    .filter((candidate) => candidate.selected && candidate.enquiry_vendor_id)
+    .map((candidate) => String(candidate.enquiry_vendor_id))
+    .filter((id) => !selectedVendors.some((vendor: RecordValue) => vendor.id === id && vendor.dispatch_status === "sent"));
+  const hasEmailSelection = pendingVendorIds.every((vendorId) => (emailSelections[vendorId] ?? []).length > 0);
 
   function patchSelectedVendors(itemId: string, updatedCandidates: RecordValue[]) {
     queryClient.setQueryData<RecordValue>(workflowQueryKeys.enquiry(detail.id), (current) => {
@@ -506,12 +551,21 @@ function EnquiryDetail({
       onError("All selected vendors have already been sent this enquiry.");
       return;
     }
+    const recipientEmails: Record<string, string[]> = {};
+    for (const vendorId of vendorIds) {
+      const emails = emailSelections[vendorId] ?? [];
+      if (!emails.length) {
+        onError("Select at least one email address for each vendor.");
+        return;
+      }
+      recipientEmails[vendorId] = emails;
+    }
     setSending(true);
     try {
       const result = await workflowApi<{ sent: number; failed: number }>("/api/enquiry-dispatches/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enquiryVendorIds: vendorIds, controlledAcknowledged: acknowledged })
+        body: JSON.stringify({ enquiryVendorIds: vendorIds, controlledAcknowledged: acknowledged, recipientEmails })
       });
       onNotice(`${result.sent} sent${result.failed ? ` · ${result.failed} failed` : ""}.`);
       await Promise.all([
@@ -635,24 +689,52 @@ function EnquiryDetail({
             {!candidateLoading && !activeItem.product_id ? (
               <p className="helper-note">Match this item to a catalog product before sourcing vendors.</p>
             ) : null}
-            {candidates.map((candidate) => (
-              <button
-                className={candidate.selected ? "candidate-row selected" : "candidate-row"}
-                disabled={candidateQuery.isPlaceholderData || vendorSaving}
-                key={candidate.company_id}
-                onClick={() => void toggleVendor(candidate.company_id)}
-                type="button"
-              >
-                <span className="candidate-check">{candidate.selected ? <Check size={14} /> : null}</span>
-                <span>
-                  <strong>{candidate.company_name}</strong>
-                  <small>{candidate.contact_email}</small>
-                </span>
-                <span>
-                  {candidate.facility_count} facilit{candidate.facility_count === 1 ? "y" : "ies"}
-                </span>
-              </button>
-            ))}
+            {candidates.map((candidate) => {
+              const emails = parseContactEmails(candidate.contact_email);
+              const vendorId = candidate.enquiry_vendor_id ? String(candidate.enquiry_vendor_id) : "";
+              const selectedEmails = vendorId ? (emailSelections[vendorId] ?? emails) : emails;
+              return (
+                <div
+                  className={candidate.selected ? "candidate-row selected" : "candidate-row"}
+                  key={candidate.company_id}
+                >
+                  <button
+                    className="candidate-row-main"
+                    disabled={candidateQuery.isPlaceholderData || vendorSaving}
+                    onClick={() => void toggleVendor(candidate.company_id)}
+                    type="button"
+                  >
+                    <span className="candidate-check">{candidate.selected ? <Check size={14} /> : null}</span>
+                    <span>
+                      <strong>{candidate.company_name}</strong>
+                      {!candidate.selected || emails.length > 1 ? (
+                        <small>{candidate.contact_email}</small>
+                      ) : (
+                        <small>{selectedEmails[0]}</small>
+                      )}
+                    </span>
+                    <span>
+                      {candidate.facility_count} facilit{candidate.facility_count === 1 ? "y" : "ies"}
+                    </span>
+                  </button>
+                  {candidate.selected && emails.length > 1 && vendorId ? (
+                    <div className="candidate-email-picker">
+                      <span className="candidate-email-label">Send to</span>
+                      {emails.map((email) => (
+                        <label className="candidate-email-option" key={email}>
+                          <input
+                            checked={selectedEmails.includes(email)}
+                            onChange={() => toggleVendorEmail(vendorId, email)}
+                            type="checkbox"
+                          />
+                          <span>{email}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
 
           {selectedVendors.length ? (
@@ -678,7 +760,7 @@ function EnquiryDetail({
               ) : null}
               <button
                 className="primary-button"
-                disabled={sending || (activeItem.is_controlled && !acknowledged)}
+                disabled={sending || !hasEmailSelection || (activeItem.is_controlled && !acknowledged)}
                 onClick={() => void sendSelected()}
                 type="button"
               >

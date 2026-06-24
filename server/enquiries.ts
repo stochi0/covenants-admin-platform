@@ -372,7 +372,8 @@ export async function selectVendors(itemId: string, companyIds: string[], admin:
 export async function sendDispatches(
   enquiryVendorIds: string[],
   controlledAcknowledged: boolean,
-  admin: AdminUser
+  admin: AdminUser,
+  recipientEmailsByVendorId: Record<string, string[]> = {}
 ) {
   const uniqueIds = [...new Set(enquiryVendorIds.filter(Boolean))];
   if (!uniqueIds.length) {
@@ -434,12 +435,28 @@ export async function sendDispatches(
 
   const transporter = createTransporter();
   for (const row of source.rows) {
-    const recipients = parseEmails(row.contact_email);
+    const availableEmails = parseEmails(row.contact_email);
+    const requestedEmails = (recipientEmailsByVendorId[row.enquiry_vendor_id] ?? [])
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean);
+    const recipients = requestedEmails.length
+      ? [...new Set(requestedEmails.filter((email) => availableEmails.includes(email)))]
+      : availableEmails;
+    if (requestedEmails.length && recipients.length !== requestedEmails.length) {
+      results.push({
+        id: row.enquiry_vendor_id,
+        status: "failed",
+        error: "One or more selected email addresses are invalid for this vendor."
+      });
+      continue;
+    }
     if (!recipients.length) {
       results.push({
         id: row.enquiry_vendor_id,
         status: "failed",
-        error: "Vendor has no valid email address."
+        error: requestedEmails.length
+          ? "Select at least one email address for this vendor."
+          : "Vendor has no valid email address."
       });
       continue;
     }
