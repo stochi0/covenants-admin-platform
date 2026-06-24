@@ -33,6 +33,7 @@ export interface AdminUser {
   email: string | null;
   firstName: string | null;
   lastName: string | null;
+  imageUrl: string | null;
   role: "admin";
 }
 
@@ -170,7 +171,7 @@ export async function authenticateAdmin(headers: HeaderMap): Promise<AdminUser> 
   const claims = await verifyClerkHeaders(headers);
   const { data, error } = await supabase
     .from("users")
-    .select("id, clerk_user_id, email, first_name, last_name, role")
+    .select("id, clerk_user_id, email, first_name, last_name, image_url, role")
     .eq("clerk_user_id", claims.sub)
     .is("deleted_at", null)
     .maybeSingle();
@@ -190,6 +191,7 @@ export async function authenticateAdmin(headers: HeaderMap): Promise<AdminUser> 
     email: typeof data.email === "string" ? data.email : null,
     firstName: typeof data.first_name === "string" ? data.first_name : null,
     lastName: typeof data.last_name === "string" ? data.last_name : null,
+    imageUrl: typeof data.image_url === "string" ? data.image_url : null,
     role: "admin"
   };
 }
