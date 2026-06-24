@@ -15,7 +15,7 @@ import {
   Upload,
   X
 } from "lucide-react";
-import type { ApiRecord } from "../shared/types";
+import type { ApiRecord, VendorCandidatesResponse } from "../shared/types";
 import { apiRequest as workflowApi } from "./lib/api";
 import { formatDate, formatDateTime } from "./lib/dates";
 import { getErrorMessage as message } from "./lib/errors";
@@ -414,12 +414,17 @@ function EnquiryDetail({
   const [sending, setSending] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [emailSelections, setEmailSelections] = useState<Record<string, string[]>>({});
+  const vendorSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingVendorSaveCountRef = useRef(0);
+  const vendorToggleVersionsRef = useRef<Record<string, number>>({});
   const activeItem = detail.items?.find((item: RecordValue) => item.id === activeItemId) ?? detail.items?.[0];
   const selectedVendors =
     detail.vendors?.filter((vendor: RecordValue) => vendor.enquiry_item_id === activeItem?.id) ?? [];
   const candidateQuery = useVendorCandidatesQuery(activeItem?.id ?? "", Boolean(activeItem?.product_id));
-  const candidates =
-    activeItem?.product_id && !candidateQuery.isPlaceholderData ? (candidateQuery.data?.records ?? []) : [];
+  const candidates = useMemo(
+    () => (activeItem?.product_id && !candidateQuery.isPlaceholderData ? (candidateQuery.data?.records ?? []) : []),
+    [activeItem?.product_id, candidateQuery.data?.records, candidateQuery.isPlaceholderData]
+  );
   const candidateLoading = candidateQuery.isLoading || candidateQuery.isPlaceholderData;
 
   useEffect(() => {
@@ -507,34 +512,52 @@ function EnquiryDetail({
     });
   }
 
-  async function toggleVendor(companyId: string) {
-    if (!activeItem?.id || candidateQuery.isPlaceholderData || vendorSaving) return;
-    const selected = new Set(
-      candidates.filter((candidate) => candidate.selected).map((candidate) => candidate.company_id)
+  function toggleVendor(companyId: string) {
+    if (!activeItem?.id || candidateQuery.isPlaceholderData) return;
+
+    const itemId = activeItem.id;
+    const queryKey = workflowQueryKeys.vendorCandidates(itemId);
+    const previous = queryClient.getQueryData<VendorCandidatesResponse>(queryKey) ?? candidateQuery.data;
+    const nextRecords = candidates.map((candidate) =>
+      candidate.company_id === companyId ? { ...candidate, selected: !candidate.selected } : candidate
     );
-    if (selected.has(companyId)) {
-      selected.delete(companyId);
-    } else {
-      selected.add(companyId);
-    }
+    const selectedCompanyIds = nextRecords
+      .filter((candidate) => candidate.selected)
+      .map((candidate) => candidate.company_id);
+    const version = (vendorToggleVersionsRef.current[itemId] ?? 0) + 1;
+
+    vendorToggleVersionsRef.current[itemId] = version;
+    queryClient.setQueryData<VendorCandidatesResponse>(queryKey, { records: nextRecords });
+    pendingVendorSaveCountRef.current += 1;
     setVendorSaving(true);
-    try {
-      const data = await workflowApi<{ records: RecordValue[] }>(
-        `/api/enquiry-items/${activeItem.id}/vendors`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ companyIds: [...selected] })
+
+    vendorSaveChainRef.current = vendorSaveChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const data = await workflowApi<{ records: RecordValue[] }>(`/api/enquiry-items/${itemId}/vendors`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ companyIds: selectedCompanyIds })
+          });
+          if (vendorToggleVersionsRef.current[itemId] === version) {
+            queryClient.setQueryData(queryKey, data);
+            patchSelectedVendors(itemId, data.records);
+            void queryClient.invalidateQueries({ queryKey: workflowQueryKeys.enquiry(detail.id) });
+          }
+        } catch (value) {
+          if (vendorToggleVersionsRef.current[itemId] === version) {
+            queryClient.setQueryData(queryKey, previous);
+            onError(message(value));
+          }
+        } finally {
+          pendingVendorSaveCountRef.current -= 1;
+          if (pendingVendorSaveCountRef.current <= 0) {
+            pendingVendorSaveCountRef.current = 0;
+            setVendorSaving(false);
+          }
         }
-      );
-      queryClient.setQueryData(workflowQueryKeys.vendorCandidates(activeItem.id), data);
-      patchSelectedVendors(activeItem.id, data.records);
-      void queryClient.invalidateQueries({ queryKey: workflowQueryKeys.enquiry(detail.id) });
-    } catch (value) {
-      onError(message(value));
-    } finally {
-      setVendorSaving(false);
-    }
+      });
   }
 
   async function sendSelected() {
@@ -682,9 +705,9 @@ function EnquiryDetail({
               <p className="eyebrow">Supabase-derived network</p>
               <h4>Vendor candidates</h4>
             </div>
-            <span>{candidates.length} available</span>
+            <span>{vendorSaving ? "Saving selection…" : `${candidates.length} available`}</span>
           </div>
-          <div className="candidate-list">
+          <div className="candidate-list" aria-busy={vendorSaving}>
             {candidateLoading ? <p className="helper-note">Finding active facilities…</p> : null}
             {!candidateLoading && !activeItem.product_id ? (
               <p className="helper-note">Match this item to a catalog product before sourcing vendors.</p>
@@ -700,8 +723,8 @@ function EnquiryDetail({
                 >
                   <button
                     className="candidate-row-main"
-                    disabled={candidateQuery.isPlaceholderData || vendorSaving}
-                    onClick={() => void toggleVendor(candidate.company_id)}
+                    disabled={candidateQuery.isPlaceholderData}
+                    onClick={() => toggleVendor(candidate.company_id)}
                     type="button"
                   >
                     <span className="candidate-check">{candidate.selected ? <Check size={14} /> : null}</span>
