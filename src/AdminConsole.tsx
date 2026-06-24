@@ -1,5 +1,20 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
+import {
+  Award,
+  Beaker,
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  CircleGauge,
+  Factory,
+  FlaskConical,
+  History,
+  Inbox,
+  MapPinned,
+  PackageSearch,
+  ShieldAlert
+} from "lucide-react";
 import type {
   ColumnMeta,
   FacilityRelationsResponse,
@@ -11,6 +26,7 @@ import type {
   SchemaResponse,
   TableMeta
 } from "../shared/types";
+import { DispatchHistoryWorkspace, EnquiriesWorkspace, OverviewWorkspace } from "./WorkflowWorkspaces";
 
 type RowRecord = Record<string, unknown>;
 type FormState = Record<string, string>;
@@ -70,6 +86,7 @@ interface AdminConsoleProps {
 export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   const [tables, setTables] = useState<TableMeta[]>([]);
   const [selectedTableName, setSelectedTableName] = useState<string>("");
+  const [activeView, setActiveView] = useState(() => readWorkspaceHash());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [records, setRecords] = useState<RowRecord[]>([]);
   const [total, setTotal] = useState(0);
@@ -312,6 +329,12 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   }, []);
 
   useEffect(() => {
+    const handleHashChange = () => setActiveView(readWorkspaceHash());
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  useEffect(() => {
     if (!selectedTable) {
       return;
     }
@@ -434,15 +457,6 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
   }, [selectedTable]);
   const { autoManagedFields, connectedTableCount, ignoredImportHeaders, importMatchers, importableColumns } =
     selectedTableDetails;
-  const tableNavigationItems = useMemo(
-    () =>
-      tables.map((table) => ({
-        editableFieldCount: table.columns.filter((column) => !column.hidden && !column.readOnly).length,
-        label: table.label,
-        name: table.name
-      })),
-    [tables]
-  );
   const importHeaders = useMemo(
     () => ({
       optional: importableColumns
@@ -497,7 +511,12 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
       const data = await api<SchemaResponse>("/api/schema");
       setTables(data.tables);
       if (data.tables.length > 0) {
-        setSelectedTableName(data.tables[0].name);
+        const requestedTable = readWorkspaceHash().startsWith("table:")
+          ? readWorkspaceHash().slice("table:".length)
+          : "";
+        setSelectedTableName(
+          data.tables.some((table) => table.name === requestedTable) ? requestedTable : data.tables[0].name
+        );
       }
     } catch (apiError) {
       setError(getErrorMessage(apiError));
@@ -563,6 +582,25 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
     setFacilityRelationsDraft(null);
     setFacilityRelationSearch({ chemistries: "", products: "", accreditations: "" });
     setActiveFacilityRelationTab("chemistries");
+  }
+
+  function selectNavigationView(id: string) {
+    const tableName = id.startsWith("table:") ? id.slice("table:".length) : "";
+    if (!tables.some((table) => table.name === tableName)) {
+      setError(`The ${tableName.replaceAll("_", " ")} workspace is not available until its Supabase migration is applied.`);
+      return;
+    }
+
+    startTransition(() => {
+      setSelectedTableName(tableName);
+      setPage(0);
+      setSearchInput("");
+      setAppliedSearch("");
+      setNotice("");
+      setError("");
+      closePanels();
+      navigateWorkspace(id, setActiveView);
+    });
   }
 
   function openImportEditor(row: RowRecord, rowIndex: number) {
@@ -976,51 +1014,86 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
           aria-expanded={!sidebarCollapsed}
           onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
         >
-          {sidebarCollapsed ? ">" : "<"}
+          {sidebarCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
         </button>
 
         <div className="brand">
           <p className="eyebrow">Admin Console</p>
-          <h1>Covenants Admin Platform</h1>
-          <p className="sidebar-copy">
-            Open internal tooling for managing Covenants business data.
-          </p>
-          <div className="admin-session">
-            <span>{getAdminDisplayName(adminUser)}</span>
-            <button onClick={() => void window.Clerk?.signOut()} type="button">
-              Sign out
-            </button>
-          </div>
+          <h1>Covenants</h1>
+          <p className="sidebar-copy">Sourcing operations and trusted marketplace data.</p>
         </div>
 
-        <nav className="table-list">
-          {tableNavigationItems.map((table) => (
-            <button
-              key={table.name}
-              className={table.name === selectedTable.name ? "table-link active" : "table-link"}
-              data-short={table.label.slice(0, 2)}
-              onClick={() => {
-                startTransition(() => {
-                  setSelectedTableName(table.name);
-                  setPage(0);
-                  setSearchInput("");
-                  setAppliedSearch("");
-                  setNotice("");
-                  setError("");
-                  closePanels();
-                });
-              }}
-              title={table.label}
-              type="button"
-            >
-              <span>{table.label}</span>
-              <strong>{table.editableFieldCount} editable fields</strong>
-            </button>
-          ))}
+        <nav className="nav-groups" aria-label="Admin navigation">
+          <NavigationGroup
+            activeView={activeView}
+            collapsed={sidebarCollapsed}
+            label="Overview"
+            items={[{ id: "overview", label: "Overview", icon: <CircleGauge size={18} /> }]}
+            onSelect={(id) => navigateWorkspace(id, setActiveView)}
+          />
+          <NavigationGroup
+            activeView={activeView}
+            collapsed={sidebarCollapsed}
+            label="Workflow"
+            items={[
+              { id: "enquiries", label: "Enquiries", icon: <Inbox size={18} /> },
+              { id: "dispatches", label: "Dispatch History", icon: <History size={18} /> }
+            ]}
+            onSelect={(id) => navigateWorkspace(id, setActiveView)}
+          />
+          <NavigationGroup
+            activeView={activeView}
+            collapsed={sidebarCollapsed}
+            label="Network"
+            items={[
+              { id: "table:companies", label: "Companies", icon: <Building2 size={18} /> },
+              { id: "table:facilities", label: "Facilities", icon: <Factory size={18} /> }
+            ]}
+            onSelect={(id) => selectNavigationView(id)}
+          />
+          <NavigationGroup
+            activeView={activeView}
+            collapsed={sidebarCollapsed}
+            label="Catalog"
+            items={[
+              { id: "table:products", label: "Products", icon: <PackageSearch size={18} /> },
+              { id: "table:chemistries", label: "Chemistries", icon: <FlaskConical size={18} /> }
+            ]}
+            onSelect={(id) => selectNavigationView(id)}
+          />
+          <NavigationGroup
+            activeView={activeView}
+            collapsed={sidebarCollapsed}
+            label="Governance"
+            items={[
+              { id: "table:controlled_substances", label: "Controlled Substances", icon: <ShieldAlert size={18} /> },
+              { id: "table:accreditations", label: "Accreditations", icon: <Award size={18} /> },
+              { id: "table:regions", label: "Regions", icon: <MapPinned size={18} /> },
+              { id: "table:products_dedupe_audit", label: "Dedupe Audit", icon: <Beaker size={18} /> }
+            ]}
+            onSelect={(id) => selectNavigationView(id)}
+          />
         </nav>
+
+        <div className="admin-session">
+          <span className="admin-avatar">{getAdminInitials(adminUser)}</span>
+          <span className="admin-session-copy">
+            <strong>{getAdminDisplayName(adminUser)}</strong>
+            <small>Administrator</small>
+          </span>
+          <button onClick={() => void window.Clerk?.signOut()} type="button">Sign out</button>
+        </div>
       </aside>
 
       <main className="workspace">
+        {activeView === "overview" ? (
+          <OverviewWorkspace onOpenEnquiries={() => navigateWorkspace("enquiries", setActiveView)} />
+        ) : activeView === "enquiries" ? (
+          <EnquiriesWorkspace />
+        ) : activeView === "dispatches" ? (
+          <DispatchHistoryWorkspace />
+        ) : (
+          <>
         <section className="workspace-header">
           <div className="table-summary">
             <div className="table-title-block">
@@ -1193,6 +1266,8 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             </button>
           </div>
         </section>
+          </>
+        )}
       </main>
 
       {editor ? (
@@ -2393,6 +2468,60 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 function getAdminDisplayName(adminUser: AdminConsoleProps["adminUser"]) {
   const name = [adminUser?.firstName, adminUser?.lastName].filter(Boolean).join(" ");
   return name || adminUser?.email || "Admin";
+}
+
+function getAdminInitials(adminUser: AdminConsoleProps["adminUser"]) {
+  const initials = [adminUser?.firstName, adminUser?.lastName]
+    .filter(Boolean)
+    .map((value) => value!.slice(0, 1).toUpperCase())
+    .join("");
+  return initials || adminUser?.email?.slice(0, 1).toUpperCase() || "A";
+}
+
+function NavigationGroup({
+  activeView,
+  collapsed,
+  label,
+  items,
+  onSelect
+}: {
+  activeView: string;
+  collapsed: boolean;
+  label: string;
+  items: Array<{ id: string; label: string; icon: ReactNode }>;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <section className="nav-group">
+      {!collapsed ? <p>{label}</p> : null}
+      {items.map((item) => (
+        <button
+          aria-current={activeView === item.id ? "page" : undefined}
+          className={activeView === item.id ? "nav-item active" : "nav-item"}
+          key={item.id}
+          onClick={() => onSelect(item.id)}
+          title={collapsed ? item.label : undefined}
+          type="button"
+        >
+          {item.icon}
+          <span>{item.label}</span>
+        </button>
+      ))}
+    </section>
+  );
+}
+
+function navigateWorkspace(id: string, setActiveView: (value: string) => void) {
+  const hash = `#/${id}`;
+  if (window.location.hash !== hash) {
+    window.history.pushState(null, "", hash);
+  }
+  setActiveView(id);
+}
+
+function readWorkspaceHash() {
+  const value = window.location.hash.replace(/^#\/?/, "");
+  return value || "overview";
 }
 
 function getErrorMessage(error: unknown) {

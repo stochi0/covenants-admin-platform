@@ -28,7 +28,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function getPool(): Pool {
+export function getPool(): Pool {
   if (!pool) {
     const url = process.env.SUPABASE_DB_URL;
     if (!url) {
