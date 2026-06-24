@@ -938,6 +938,20 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>;
 }
 
+function getProductDisplay(item: RecordValue) {
+  const name = String(item.product_name ?? "").trim();
+  const code = String(item.product_code ?? item.product_id ?? "").trim();
+  const casNumber = String(item.cas_number ?? "").trim();
+  const primary = name || (code ? `Product code: ${code}` : casNumber || "Unmatched material");
+  const secondary = name && code ? `Product code: ${code}` : "";
+
+  return {
+    primary,
+    secondary,
+    title: [primary, secondary, casNumber ? `CAS: ${casNumber}` : ""].filter(Boolean).join(" · ")
+  };
+}
+
 function StagePill({ stage }: { stage: string }) {
   const key = String(stage || "").toLowerCase().replaceAll(" ", "-").replaceAll("_", "-");
   return <span className={`stage-pill stage-${key}`}>{stage || "Unknown"}</span>;

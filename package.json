@@ -8,8 +8,9 @@
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
     "build": "npm run build:client && npm run build:server",
-    "build:client": "vite build",
+    "build:client": "npm run typecheck:client && vite build",
     "build:server": "tsc -p tsconfig.server.json",
+    "typecheck:client": "tsc --noEmit -p tsconfig.json",
     "db:migrate": "node scripts/apply-migrations.mjs",
     "db:seed:controlled": "node scripts/seed-controlled-substances.mjs",
     "start": "node dist/server/server/index.js"
