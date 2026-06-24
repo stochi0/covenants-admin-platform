@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ApiRecord,
   DashboardMetricsResponse,
@@ -71,7 +71,8 @@ export function useVendorCandidatesQuery(itemId: string, enabled = true) {
   return useQuery({
     enabled: enabled && Boolean(itemId),
     queryKey: workflowQueryKeys.vendorCandidates(itemId),
-    queryFn: () => apiRequest<VendorCandidatesResponse>(`/api/enquiry-items/${itemId}/vendors`)
+    queryFn: () => apiRequest<VendorCandidatesResponse>(`/api/enquiry-items/${itemId}/vendors`),
+    placeholderData: keepPreviousData
   });
 }
 

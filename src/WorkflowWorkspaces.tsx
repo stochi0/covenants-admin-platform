@@ -1,4 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -18,16 +19,18 @@ import type { ApiRecord } from "../shared/types";
 import { apiRequest as workflowApi } from "./lib/api";
 import { formatDate, formatDateTime } from "./lib/dates";
 import { getErrorMessage as message } from "./lib/errors";
-import { useDashboardQuery, useDispatchesQuery } from "./features/workflow/hooks";
+import {
+  useDashboardQuery,
+  useDispatchesQuery,
+  useEnquiriesQuery,
+  useEnquiryQuery,
+  useVendorCandidatesQuery,
+  workflowQueryKeys
+} from "./features/workflow/hooks";
 import { StatusBanner } from "./components/StatusBanner";
 import { Field } from "./components/Field";
 
 type RecordValue = ApiRecord;
-
-interface EnquiryListResponse {
-  records: RecordValue[];
-  total: number;
-}
 
 interface EnquiryDraftItem {
   productId: string;
@@ -50,6 +53,17 @@ const EMPTY_ITEM: EnquiryDraftItem = {
   remarks: "",
   additionalQuantities: []
 };
+
+function useDebouncedValue(value: string, delayMs: number) {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+
+  return debounced;
+}
 
 export function OverviewWorkspace({ onOpenEnquiries }: { onOpenEnquiries: () => void }) {
   const { data, error } = useDashboardQuery();
@@ -110,66 +124,28 @@ export function OverviewWorkspace({ onOpenEnquiries }: { onOpenEnquiries: () => 
 }
 
 export function EnquiriesWorkspace() {
-  const [records, setRecords] = useState<RecordValue[]>([]);
-  const [total, setTotal] = useState(0);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 220);
+  const [localError, setLocalError] = useState("");
   const [notice, setNotice] = useState("");
   const [selectedId, setSelectedId] = useState("");
-  const [detail, setDetail] = useState<RecordValue | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const hasLoadedRecords = useRef(false);
+  const enquiriesQuery = useEnquiriesQuery(debouncedSearch, stage);
+  const detailQuery = useEnquiryQuery(selectedId);
+  const records = enquiriesQuery.data?.records ?? [];
+  const total = enquiriesQuery.data?.total ?? 0;
+  const detail = detailQuery.data ?? null;
+  const loading = enquiriesQuery.isLoading;
+  const error = localError || (enquiriesQuery.error ? message(enquiriesQuery.error) : detailQuery.error ? message(detailQuery.error) : "");
 
-  async function loadRecords(signal?: AbortSignal, showInitialLoading = false) {
-    if (showInitialLoading) setLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: "100", offset: "0" });
-      if (search.trim()) params.set("search", search.trim());
-      if (stage) params.set("stage", stage);
-      const data = await workflowApi<EnquiryListResponse>(`/api/enquiries?${params}`, { signal });
-      setRecords(data.records);
-      setTotal(data.total);
-      setError("");
-    } catch (value) {
-      if (!signal?.aborted) setError(message(value));
-    } finally {
-      if (!signal?.aborted) {
-        hasLoadedRecords.current = true;
-        setLoading(false);
-      }
-    }
-  }
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const timer = window.setTimeout(
-      () => void loadRecords(controller.signal, !hasLoadedRecords.current),
-      220
-    );
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [search, stage]);
-
-  async function openDetail(id: string, preserveCurrent = false) {
-    setSelectedId(id);
-    if (!preserveCurrent || detail?.id !== id) setDetail(null);
-    try {
-      setDetail(await workflowApi<RecordValue>(`/api/enquiries/${id}`));
-    } catch (value) {
-      setError(message(value));
-    }
-  }
-
-  async function refreshAfterMutation(id?: string) {
+  async function refreshListAndDetail(id?: string) {
     const detailId = id || selectedId;
     await Promise.all([
-      loadRecords(),
-      detailId ? openDetail(detailId, !id && detail?.id === detailId) : Promise.resolve()
+      queryClient.invalidateQueries({ queryKey: ["workflow", "enquiries"] }),
+      detailId ? queryClient.invalidateQueries({ queryKey: workflowQueryKeys.enquiry(detailId) }) : Promise.resolve()
     ]);
   }
 
@@ -230,7 +206,10 @@ export function EnquiriesWorkspace() {
               <button
                 className={selectedId === record.id ? "enquiry-list-row active" : "enquiry-list-row"}
                 key={record.id}
-                onClick={() => void openDetail(record.id)}
+                onClick={() => {
+                  setLocalError("");
+                  setSelectedId(record.id);
+                }}
                 type="button"
               >
                 <div>
@@ -262,9 +241,8 @@ export function EnquiriesWorkspace() {
           ) : detail ? (
             <EnquiryDetail
               detail={detail}
-              onRefresh={() => refreshAfterMutation()}
               onNotice={setNotice}
-              onError={setError}
+              onError={setLocalError}
             />
           ) : (
             <div className="detail-placeholder">
@@ -282,7 +260,8 @@ export function EnquiriesWorkspace() {
           onCreated={async (id) => {
             setCreateOpen(false);
             setNotice("Enquiry created.");
-            await refreshAfterMutation(id);
+            setSelectedId(id);
+            await refreshListAndDetail(id);
           }}
         />
       ) : null}
@@ -292,7 +271,7 @@ export function EnquiriesWorkspace() {
           onImported={async (count) => {
             setImportOpen(false);
             setNotice(`Imported ${count} enquiries.`);
-            await loadRecords();
+            await queryClient.invalidateQueries({ queryKey: ["workflow", "enquiries"] });
           }}
         />
       ) : null}
@@ -370,37 +349,80 @@ export function DispatchHistoryWorkspace() {
 
 function EnquiryDetail({
   detail,
-  onRefresh,
   onNotice,
   onError
 }: {
   detail: RecordValue;
-  onRefresh: () => Promise<void>;
   onNotice: (value: string) => void;
   onError: (value: string) => void;
 }) {
+  const queryClient = useQueryClient();
   const [activeItemId, setActiveItemId] = useState(detail.items?.[0]?.id ?? "");
-  const [candidates, setCandidates] = useState<RecordValue[]>([]);
-  const [candidateLoading, setCandidateLoading] = useState(false);
+  const [vendorSaving, setVendorSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const activeItem = detail.items?.find((item: RecordValue) => item.id === activeItemId) ?? detail.items?.[0];
   const selectedVendors =
     detail.vendors?.filter((vendor: RecordValue) => vendor.enquiry_item_id === activeItem?.id) ?? [];
+  const candidateQuery = useVendorCandidatesQuery(activeItem?.id ?? "", Boolean(activeItem?.product_id));
+  const candidates =
+    activeItem?.product_id && !candidateQuery.isPlaceholderData ? (candidateQuery.data?.records ?? []) : [];
+  const candidateLoading = candidateQuery.isLoading || candidateQuery.isPlaceholderData;
 
   useEffect(() => {
-    if (!activeItem?.id || !activeItem.product_id) {
-      setCandidates([]);
-      return;
+    if (!detail.items?.some((item: RecordValue) => item.id === activeItemId)) {
+      setActiveItemId(detail.items?.[0]?.id ?? "");
     }
-    setCandidateLoading(true);
-    void workflowApi<{ records: RecordValue[] }>(`/api/enquiry-items/${activeItem.id}/vendors`)
-      .then((data) => setCandidates(data.records))
-      .catch((value) => onError(message(value)))
-      .finally(() => setCandidateLoading(false));
-  }, [activeItem?.id]);
+  }, [activeItemId, detail.items]);
+
+  useEffect(() => {
+    const productItems = detail.items?.filter((item: RecordValue) => item.id && item.product_id) ?? [];
+    productItems.forEach((item: RecordValue) => {
+      void queryClient.prefetchQuery({
+        queryKey: workflowQueryKeys.vendorCandidates(item.id),
+        queryFn: () => workflowApi<{ records: RecordValue[] }>(`/api/enquiry-items/${item.id}/vendors`)
+      });
+    });
+  }, [detail.items, queryClient]);
+
+  useEffect(() => {
+    if (candidateQuery.error) onError(message(candidateQuery.error));
+  }, [candidateQuery.error, onError]);
+
+  function patchSelectedVendors(itemId: string, updatedCandidates: RecordValue[]) {
+    queryClient.setQueryData<RecordValue>(workflowQueryKeys.enquiry(detail.id), (current) => {
+      if (!current) return current;
+      const existing = current.vendors ?? [];
+      const existingForItem = new Map<string, RecordValue>(
+        existing
+          .filter((vendor: RecordValue) => vendor.enquiry_item_id === itemId)
+          .map((vendor: RecordValue) => [String(vendor.company_id), vendor])
+      );
+      const updatedForItem = updatedCandidates
+        .filter((candidate) => candidate.selected && candidate.enquiry_vendor_id)
+        .map((candidate) => ({
+          ...(existingForItem.get(candidate.company_id) ?? {}),
+          id: candidate.enquiry_vendor_id,
+          enquiry_item_id: itemId,
+          company_id: candidate.company_id,
+          company_name: candidate.company_name,
+          contact_email: candidate.contact_email,
+          dispatch_status: existingForItem.get(candidate.company_id)?.dispatch_status ?? null,
+          response_status: existingForItem.get(candidate.company_id)?.response_status ?? "awaiting"
+        }));
+
+      return {
+        ...current,
+        vendors: [
+          ...existing.filter((vendor: RecordValue) => vendor.enquiry_item_id !== itemId),
+          ...updatedForItem
+        ]
+      };
+    });
+  }
 
   async function toggleVendor(companyId: string) {
+    if (!activeItem?.id || candidateQuery.isPlaceholderData || vendorSaving) return;
     const selected = new Set(
       candidates.filter((candidate) => candidate.selected).map((candidate) => candidate.company_id)
     );
@@ -409,6 +431,7 @@ function EnquiryDetail({
     } else {
       selected.add(companyId);
     }
+    setVendorSaving(true);
     try {
       const data = await workflowApi<{ records: RecordValue[] }>(
         `/api/enquiry-items/${activeItem.id}/vendors`,
@@ -418,10 +441,13 @@ function EnquiryDetail({
           body: JSON.stringify({ companyIds: [...selected] })
         }
       );
-      setCandidates(data.records);
-      await onRefresh();
+      queryClient.setQueryData(workflowQueryKeys.vendorCandidates(activeItem.id), data);
+      patchSelectedVendors(activeItem.id, data.records);
+      void queryClient.invalidateQueries({ queryKey: workflowQueryKeys.enquiry(detail.id) });
     } catch (value) {
       onError(message(value));
+    } finally {
+      setVendorSaving(false);
     }
   }
 
@@ -447,7 +473,10 @@ function EnquiryDetail({
         body: JSON.stringify({ enquiryVendorIds: vendorIds, controlledAcknowledged: acknowledged })
       });
       onNotice(`${result.sent} sent${result.failed ? ` · ${result.failed} failed` : ""}.`);
-      await onRefresh();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: workflowQueryKeys.enquiry(detail.id) }),
+        queryClient.invalidateQueries({ queryKey: ["workflow", "dispatches"] })
+      ]);
     } catch (value) {
       onError(message(value));
     } finally {
@@ -457,13 +486,14 @@ function EnquiryDetail({
 
   async function updateResolution(resolution: string) {
     try {
-      await workflowApi(`/api/enquiries/${detail.id}/resolution`, {
+      const updated = await workflowApi<RecordValue>(`/api/enquiries/${detail.id}/resolution`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resolution })
       });
+      queryClient.setQueryData(workflowQueryKeys.enquiry(detail.id), updated);
+      void queryClient.invalidateQueries({ queryKey: ["workflow", "enquiries"] });
       onNotice(`Enquiry marked ${resolution}.`);
-      await onRefresh();
     } catch (value) {
       onError(message(value));
     }
@@ -567,6 +597,7 @@ function EnquiryDetail({
             {candidates.map((candidate) => (
               <button
                 className={candidate.selected ? "candidate-row selected" : "candidate-row"}
+                disabled={candidateQuery.isPlaceholderData || vendorSaving}
                 key={candidate.company_id}
                 onClick={() => void toggleVendor(candidate.company_id)}
                 type="button"
@@ -624,7 +655,12 @@ function EnquiryDetail({
                 </div>
               </div>
               {selectedVendors.map((vendor: RecordValue) => (
-                <QuoteRow key={vendor.id} vendor={vendor} onError={onError} onSaved={onRefresh} />
+                <QuoteRow
+                  detailId={detail.id}
+                  key={vendor.id}
+                  vendor={vendor}
+                  onError={onError}
+                />
               ))}
             </div>
           ) : null}
@@ -635,14 +671,15 @@ function EnquiryDetail({
 }
 
 function QuoteRow({
+  detailId,
   vendor,
-  onSaved,
   onError
 }: {
+  detailId: string;
   vendor: RecordValue;
-  onSaved: () => Promise<void>;
   onError: (value: string) => void;
 }) {
+  const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     responseStatus: vendor.response_status || "awaiting",
@@ -664,7 +701,7 @@ function QuoteRow({
         body: JSON.stringify(form)
       });
       setEditing(false);
-      await onSaved();
+      await queryClient.invalidateQueries({ queryKey: workflowQueryKeys.enquiry(detailId) });
     } catch (value) {
       onError(message(value));
     }

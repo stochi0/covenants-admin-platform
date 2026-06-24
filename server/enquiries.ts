@@ -114,69 +114,70 @@ export async function getEnquiry(id: string) {
     throw new Error("Enquiry not found.");
   }
 
-  const items = await getPool().query(
-    `select
-       ei.*,
-       coalesce(p.product_name, ei.raw_product_name) as product_name,
-       coalesce(p.cas_number, ei.raw_cas_number) as cas_number,
-       p.category,
-       cs.id is not null as is_controlled,
-       cs.reason as controlled_reason,
-       cs.scomet_entry,
-       coalesce(
-         jsonb_agg(distinct jsonb_build_object('id', eq.id, 'quantity', eq.quantity, 'unit', eq.unit))
-           filter (where eq.id is not null),
-         '[]'::jsonb
-       ) as quantities
-     from public.enquiry_items ei
-     left join public.products p on p.id = ei.product_id
-     left join public.controlled_substances cs
-       on cs.is_active
-      and cs.normalized_cas = lower(regexp_replace(btrim(coalesce(p.cas_number, ei.raw_cas_number)), '\\s+', '', 'g'))
-     left join public.enquiry_quantities eq on eq.enquiry_item_id = ei.id
-     where ei.enquiry_id = $1
-     group by ei.id, p.id, cs.id
-     order by ei.created_at`,
-    [id]
-  );
-
-  const vendors = await getPool().query(
-    `select
-       ev.id,
-       ev.enquiry_item_id,
-       ev.company_id,
-       c.name as company_name,
-       c.contact_email,
-       ev.selected_at,
-       latest_dispatch.id as latest_dispatch_id,
-       latest_dispatch.status as dispatch_status,
-       latest_dispatch.sent_at,
-       latest_dispatch.error_message,
-       vq.id as quote_id,
-       vq.response_status,
-       vq.price,
-       vq.currency,
-       vq.lead_time_days,
-       vq.packing,
-       vq.hsn_code,
-       vq.notes as quote_notes,
-       vq.outcome,
-       vq.responded_at
-     from public.enquiry_vendors ev
-     join public.companies c on c.id = ev.company_id
-     left join lateral (
-       select ed.*
-       from public.enquiry_dispatches ed
-       where ed.enquiry_vendor_id = ev.id
-       order by ed.created_at desc
-       limit 1
-     ) latest_dispatch on true
-     left join public.vendor_quotes vq on vq.enquiry_vendor_id = ev.id
-     join public.enquiry_items ei on ei.id = ev.enquiry_item_id
-     where ei.enquiry_id = $1
-     order by c.name`,
-    [id]
-  );
+  const [items, vendors] = await Promise.all([
+    getPool().query(
+      `select
+         ei.*,
+         coalesce(p.product_name, ei.raw_product_name) as product_name,
+         coalesce(p.cas_number, ei.raw_cas_number) as cas_number,
+         p.category,
+         cs.id is not null as is_controlled,
+         cs.reason as controlled_reason,
+         cs.scomet_entry,
+         coalesce(
+           jsonb_agg(distinct jsonb_build_object('id', eq.id, 'quantity', eq.quantity, 'unit', eq.unit))
+             filter (where eq.id is not null),
+           '[]'::jsonb
+         ) as quantities
+       from public.enquiry_items ei
+       left join public.products p on p.id = ei.product_id
+       left join public.controlled_substances cs
+         on cs.is_active
+        and cs.normalized_cas = lower(regexp_replace(btrim(coalesce(p.cas_number, ei.raw_cas_number)), '\\s+', '', 'g'))
+       left join public.enquiry_quantities eq on eq.enquiry_item_id = ei.id
+       where ei.enquiry_id = $1
+       group by ei.id, p.id, cs.id
+       order by ei.created_at`,
+      [id]
+    ),
+    getPool().query(
+      `select
+         ev.id,
+         ev.enquiry_item_id,
+         ev.company_id,
+         c.name as company_name,
+         c.contact_email,
+         ev.selected_at,
+         latest_dispatch.id as latest_dispatch_id,
+         latest_dispatch.status as dispatch_status,
+         latest_dispatch.sent_at,
+         latest_dispatch.error_message,
+         vq.id as quote_id,
+         vq.response_status,
+         vq.price,
+         vq.currency,
+         vq.lead_time_days,
+         vq.packing,
+         vq.hsn_code,
+         vq.notes as quote_notes,
+         vq.outcome,
+         vq.responded_at
+       from public.enquiry_vendors ev
+       join public.companies c on c.id = ev.company_id
+       left join lateral (
+         select ed.*
+         from public.enquiry_dispatches ed
+         where ed.enquiry_vendor_id = ev.id
+         order by ed.created_at desc
+         limit 1
+       ) latest_dispatch on true
+       left join public.vendor_quotes vq on vq.enquiry_vendor_id = ev.id
+       join public.enquiry_items ei on ei.id = ev.enquiry_item_id
+       where ei.enquiry_id = $1
+       order by c.name`,
+      [id]
+    )
+  ]);
 
   return { ...enquiry, items: items.rows, vendors: vendors.rows };
 }
