@@ -16,11 +16,14 @@ export async function listRecords(
   options: {
     limit: number;
     offset: number;
+    includeAllColumns?: boolean;
     search?: string;
   }
 ): Promise<RecordsResponse> {
   const table = getTableOrThrow(tableName);
-  let query = supabase.from(table.name).select("*", { count: "exact" });
+  let query = supabase.from(table.name).select(getRecordSelectColumns(table, options.includeAllColumns), {
+    count: "exact"
+  });
 
   if (hasDeletedAtColumn(table)) {
     query = query.is("deleted_at", null);
@@ -72,6 +75,12 @@ async function buildSearchFilters(table: TableMeta, search: string): Promise<str
 
     if (["text", "custom", "date", "timestamp"].includes(column.kind)) {
       filters.push(`${column.name}.ilike.%${escaped}%`);
+      if (table.name === "controlled_substances" && column.name === "cas_number") {
+        const normalizedCas = normalizeCasSearch(search);
+        if (normalizedCas) {
+          filters.push(`normalized_cas.ilike.%${escapeForIlike(normalizedCas)}%`);
+        }
+      }
       continue;
     }
 
@@ -99,6 +108,22 @@ async function buildSearchFilters(table: TableMeta, search: string): Promise<str
   }
 
   return filters;
+}
+
+function getRecordSelectColumns(table: TableMeta, includeAllColumns = false): string {
+  if (includeAllColumns) {
+    return "*";
+  }
+
+  const columnNames = table.readOnly
+    ? [...table.primaryKeys, ...table.listColumns]
+    : table.columns.filter((column) => !column.hidden).map((column) => column.name);
+
+  return [...new Set(columnNames)].join(",");
+}
+
+function normalizeCasSearch(search: string): string {
+  return search.trim().replace(/\s+/g, "").toLowerCase();
 }
 
 async function findForeignKeySearchMatches(
@@ -450,7 +475,7 @@ async function getProductFacilityRelationOptions(
   } else if (trimmedSearch) {
     query = query.is("deleted_at", null).ilike("cas_number", `%${escapeForIlike(trimmedSearch)}%`);
   } else {
-    query = query.is("deleted_at", null).not("cas_number", "is", null);
+    return { options: [] };
   }
 
   const { data, error } = await query;

@@ -14,7 +14,7 @@ import {
   upsertFacilityRelations,
   updateRecord
 } from "./modules/records.js";
-import { requireAdmin, verifyClerkHeaders, type AuthenticatedAdminRequest } from "./auth.js";
+import { authenticateAdmin, clearAdminCache, requireAdmin, verifyClerkHeaders, type AuthenticatedAdminRequest } from "./auth.js";
 import {
   createEnquiry,
   getDashboardMetrics,
@@ -87,9 +87,15 @@ app.post("/api/users/sync", async (req, res) => {
       imageUrl: readString(body.imageUrl),
       emailVerified: body.emailVerified === true
     });
+    clearAdminCache(claims.sub!);
+    const user = await authenticateAdmin(req.headers);
 
-    res.status(200).json({ id });
+    res.status(200).json({ id, user });
   } catch (error) {
+    if (error instanceof Error && error.name === "ForbiddenError") {
+      res.status(403).json({ error: "Admin access is required." });
+      return;
+    }
     console.error("User sync failed:", error);
     res.status(500).json({
       error: "Unable to prepare your account."
@@ -225,7 +231,8 @@ app.get("/api/records/:table", async (req, res) => {
     const limit = clampNumber(req.query.limit, 25, 1, 100);
     const offset = clampNumber(req.query.offset, 0, 0, 10_000);
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
-    const data = await listRecords(req.params.table, { limit, offset, search });
+    const includeAllColumns = req.query.view === "export";
+    const data = await listRecords(req.params.table, { includeAllColumns, limit, offset, search });
     res.json(data);
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });

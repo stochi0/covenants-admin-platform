@@ -1,4 +1,5 @@
-import { lazy, startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { lazy, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Award,
@@ -25,7 +26,6 @@ import type {
   OptionRecord,
   OptionsResponse,
   RecordsResponse,
-  SchemaResponse,
   TableMeta
 } from "../shared/types";
 import { apiRequest as api } from "./lib/api";
@@ -34,6 +34,11 @@ import { getErrorMessage } from "./lib/errors";
 import { NavigationGroup } from "./app/AdminShell";
 import { DataTable } from "./components/DataTable";
 import { StatusBanner } from "./components/StatusBanner";
+import {
+  adminCrudQueryKeys,
+  useRecordsQuery,
+  useSchemaQuery
+} from "./features/admin-crud/hooks";
 
 const OverviewWorkspace = lazy(() => import("./features/workflow/OverviewWorkspace"));
 const EnquiriesWorkspace = lazy(() => import("./features/workflow/EnquiriesWorkspace"));
@@ -95,17 +100,13 @@ interface AdminConsoleProps {
 }
 
 export default function AdminConsole({ adminUser, onAdminUserChange }: AdminConsoleProps) {
-  const [tables, setTables] = useState<TableMeta[]>([]);
+  const queryClient = useQueryClient();
   const [selectedTableName, setSelectedTableName] = useState<string>("");
   const [activeView, setActiveView] = useState(() => readWorkspaceHash());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [records, setRecords] = useState<RowRecord[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [loadingSchema, setLoadingSchema] = useState(true);
-  const [loadingRecords, setLoadingRecords] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -137,13 +138,22 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
   const [activeFacilityRelationTab, setActiveFacilityRelationTab] =
     useState<RelationSearchKey>("chemistries");
   const [quickCreatingRelation, setQuickCreatingRelation] = useState<RelationSearchKey | null>(null);
-  const loadedLookupTables = useRef(new Set<string>());
   const isTableView = activeView.startsWith("table:");
+  const schemaQuery = useSchemaQuery();
+  const tables = useMemo(() => schemaQuery.data?.tables ?? [], [schemaQuery.data?.tables]);
 
   const selectedTable = useMemo(
     () => tables.find((table) => table.name === selectedTableName) ?? null,
     [selectedTableName, tables]
   );
+  const recordsQuery = useRecordsQuery(selectedTable?.name ?? "", page, PAGE_SIZE, appliedSearch, isTableView);
+  const activeRecordsQueryKey = selectedTable
+    ? adminCrudQueryKeys.records(selectedTable.name, page, PAGE_SIZE, appliedSearch)
+    : null;
+  const records = useMemo(() => recordsQuery.data?.records ?? [], [recordsQuery.data?.records]);
+  const total = recordsQuery.data?.total ?? 0;
+  const loadingSchema = schemaQuery.isLoading;
+  const loadingRecords = recordsQuery.isLoading || (recordsQuery.isFetching && !recordsQuery.data);
 
   function createEmptyFacilityRelationsDraft(): FacilityRelationsUpsertRequest {
     return {
@@ -186,6 +196,40 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     return options.find((option) => option.value === id) ?? null;
   }
 
+  const fetchOptions = useCallback(
+    (
+      tableName: string,
+      {
+        ids = "",
+        limit = 50,
+        search = "",
+        signal,
+        variant = ""
+      }: { ids?: string; limit?: number; search?: string; signal?: AbortSignal; variant?: string } = {}
+    ) =>
+      queryClient.fetchQuery({
+        queryKey: adminCrudQueryKeys.options(tableName, search, variant, ids, limit),
+        queryFn: ({ signal: querySignal }) => {
+          const params = new URLSearchParams({ limit: String(limit) });
+          if (ids) params.set("ids", ids);
+          if (search) params.set("search", search);
+          if (variant) params.set("variant", variant);
+          return api<OptionsResponse>(`/api/options/${tableName}?${params.toString()}`, {
+            signal: signal ?? querySignal
+          });
+        },
+        staleTime: 30_000
+      }),
+    [queryClient]
+  );
+
+  const mergeLookupOptions = useCallback((tableName: string, options: OptionsResponse["options"]) => {
+    setLookups((current) => ({
+      ...current,
+      [tableName]: mergeOptions(current[tableName] ?? [], options)
+    }));
+  }, []);
+
   async function loadRelationOptionsByIds(key: RelationSearchKey, ids: string[]) {
     const missingIds = [...new Set(ids.filter((id) => id && !getRelationOption(key, id)))];
     if (missingIds.length === 0) {
@@ -193,50 +237,44 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     }
 
     const tableName = RELATION_TABLE_BY_KEY[key];
-    const params = new URLSearchParams({
+    const data = await fetchOptions(tableName, {
       ids: missingIds.join(","),
-      limit: String(missingIds.length)
+      limit: missingIds.length,
+      variant: key === "products" ? "facility_relation" : ""
     });
-    if (key === "products") {
-      params.set("variant", "facility_relation");
-    }
-
-    const data = await api<OptionsResponse>(`/api/options/${tableName}?${params.toString()}`);
-    setLookups((current) => ({
-      ...current,
-      [tableName]: mergeOptions(current[tableName] ?? [], data.options)
-    }));
+    mergeLookupOptions(tableName, data.options);
   }
 
-  async function loadRelationOptions(key: RelationSearchKey, search = "", signal?: AbortSignal) {
+  const loadRelationOptions = useCallback(async (key: RelationSearchKey, search = "", signal?: AbortSignal) => {
     setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: true }));
 
     const tableName = RELATION_TABLE_BY_KEY[key];
-    const params = new URLSearchParams({
-      limit: String(RELATION_OPTION_LIMIT)
-    });
-    if (key === "products") {
-      params.set("variant", "facility_relation");
-    }
     const query = search.trim();
-    if (query) {
-      params.set("search", query);
+    if (key === "products" && query.length < 2) {
+      setFacilityRelationOptions((current) => ({
+        ...current,
+        [key]: []
+      }));
+      setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
+      return [];
     }
 
-    const data = await api<OptionsResponse>(`/api/options/${tableName}?${params.toString()}`, { signal });
+    const data = await fetchOptions(tableName, {
+      limit: RELATION_OPTION_LIMIT,
+      search: query,
+      signal,
+      variant: key === "products" ? "facility_relation" : ""
+    });
 
     setFacilityRelationOptions((current) => ({
       ...current,
       [key]: data.options
     }));
-    setLookups((current) => ({
-      ...current,
-      [tableName]: mergeOptions(current[tableName] ?? [], data.options)
-    }));
+    mergeLookupOptions(tableName, data.options);
     setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
 
     return data.options;
-  }
+  }, [fetchOptions, mergeLookupOptions]);
 
   async function quickCreateRelationOption(
     key: RelationSearchKey,
@@ -342,48 +380,38 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
   }, [selectedTable]);
 
   useEffect(() => {
-    void loadSchema();
-  }, []);
-
-  useEffect(() => {
     const handleHashChange = () => setActiveView(readWorkspaceHash());
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
   useEffect(() => {
-    if (!isTableView || !selectedTable) {
-      setLoadingRecords(false);
+    if (!schemaQuery.data?.tables.length) {
       return;
     }
 
-    const controller = new AbortController();
-    setLoadingRecords(true);
-    setError("");
+    const currentView = readWorkspaceHash();
+    const requestedTable = currentView.startsWith("table:") ? currentView.slice("table:".length) : "";
+    if (requestedTable && !selectedTableName) {
+      setSelectedTableName(
+        schemaQuery.data.tables.some((table) => table.name === requestedTable)
+          ? requestedTable
+          : schemaQuery.data.tables[0]?.name ?? ""
+      );
+    }
+  }, [schemaQuery.data?.tables, selectedTableName]);
 
-    void api<RecordsResponse>(
-      `/api/records/${selectedTable.name}?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}&search=${encodeURIComponent(
-        appliedSearch
-      )}`,
-      { signal: controller.signal }
-    )
-      .then((data) => {
-        setRecords(data.records);
-        setTotal(data.total);
-      })
-      .catch((apiError: unknown) => {
-        if (!controller.signal.aborted) {
-          setError(getErrorMessage(apiError));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setLoadingRecords(false);
-        }
-      });
+  useEffect(() => {
+    if (schemaQuery.error) {
+      setError(getErrorMessage(schemaQuery.error));
+    }
+  }, [schemaQuery.error]);
 
-    return () => controller.abort();
-  }, [appliedSearch, isTableView, page, selectedTable]);
+  useEffect(() => {
+    if (recordsQuery.error) {
+      setError(getErrorMessage(recordsQuery.error));
+    }
+  }, [recordsQuery.error]);
 
   useEffect(() => {
     if (!isTableView || !selectedTable || foreignTableNames.length === 0) {
@@ -391,21 +419,45 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     }
 
     for (const foreignTable of foreignTableNames) {
-      if (lookups[foreignTable] || loadedLookupTables.current.has(foreignTable)) {
+      if (lookups[foreignTable]) {
         continue;
       }
 
-      loadedLookupTables.current.add(foreignTable);
-      void api<OptionsResponse>(`/api/options/${foreignTable}`)
+      void fetchOptions(foreignTable)
         .then((data) => {
           setLookups((current) => ({ ...current, [foreignTable]: data.options }));
         })
         .catch((apiError: unknown) => {
-          loadedLookupTables.current.delete(foreignTable);
           setError(getErrorMessage(apiError));
         });
     }
-  }, [foreignTableNames, isTableView, selectedTable]);
+  }, [fetchOptions, foreignTableNames, isTableView, lookups, selectedTable]);
+
+  useEffect(() => {
+    if (!isTableView || !selectedTable || records.length === 0) {
+      return;
+    }
+
+    const foreignColumns = selectedTable.columns.filter((column) => column.foreignKey);
+    for (const foreignTable of foreignTableNames) {
+      const ids = [
+        ...new Set(
+          foreignColumns
+            .filter((column) => column.foreignKey?.referencesTable === foreignTable)
+            .flatMap((column) => records.map((record) => String(record[column.name] ?? "")))
+            .filter(Boolean)
+        )
+      ].filter((id) => !(lookups[foreignTable] ?? []).some((option) => option.value === id));
+
+      if (ids.length === 0) {
+        continue;
+      }
+
+      void fetchOptions(foreignTable, { ids: ids.join(","), limit: ids.length })
+        .then((data) => mergeLookupOptions(foreignTable, data.options))
+        .catch((apiError: unknown) => setError(getErrorMessage(apiError)));
+    }
+  }, [fetchOptions, foreignTableNames, isTableView, lookups, mergeLookupOptions, records, selectedTable]);
 
   useEffect(() => {
     if (selectedTable?.name !== "facilities" || !editor) {
@@ -429,7 +481,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeFacilityRelationTab, editor, facilityRelationSearch, selectedTable?.name]);
+  }, [activeFacilityRelationTab, editor, facilityRelationSearch, loadRelationOptions, selectedTable?.name]);
 
   const visibleColumns = useMemo(() => {
     if (!selectedTable) {
@@ -547,27 +599,6 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     )} so imports update existing entries instead of creating duplicates.`;
   }, [activeImportMatcher, importMatcherSummary, importMatchers.length, importState, selectedTable]);
 
-  async function loadSchema() {
-    try {
-      setLoadingSchema(true);
-      const data = await api<SchemaResponse>("/api/schema");
-      setTables(data.tables);
-      if (data.tables.length > 0) {
-        const currentView = readWorkspaceHash();
-        const requestedTable = currentView.startsWith("table:") ? currentView.slice("table:".length) : "";
-        if (requestedTable) {
-          setSelectedTableName(
-            data.tables.some((table) => table.name === requestedTable) ? requestedTable : data.tables[0].name
-          );
-        }
-      }
-    } catch (apiError) {
-      setError(getErrorMessage(apiError));
-    } finally {
-      setLoadingSchema(false);
-    }
-  }
-
   function handleSearchSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     setPage(0);
@@ -586,7 +617,6 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     setFormState(createEmptyForm(selectedTable));
     if (selectedTable.name === "facilities") {
       setFacilityRelationsDraft(createEmptyFacilityRelationsDraft());
-      void ensureFacilityRelationOptions();
     } else {
       setFacilityRelationsDraft(null);
     }
@@ -788,20 +818,41 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         String(savedRow.id ?? editor.row?.id ?? "")
       ) {
         const facilityId = String(savedRow.id ?? editor.row?.id ?? "");
-        await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`, {
+        const relations = await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(facilityRelationsDraft)
         });
+        queryClient.setQueryData(adminCrudQueryKeys.facilityRelations(facilityId), relations);
       }
 
+      if (activeRecordsQueryKey) {
+        queryClient.setQueryData<RecordsResponse>(activeRecordsQueryKey, (current) => {
+          if (!current) return current;
+          const savedKey = createRowKey(selectedTable, savedRow, -1);
+          const existingIndex = current.records.findIndex(
+            (row, index) => createRowKey(selectedTable, row, index) === savedKey
+          );
+          if (existingIndex >= 0) {
+            return {
+              ...current,
+              records: current.records.map((row, index) => (index === existingIndex ? savedRow : row))
+            };
+          }
+          return {
+            ...current,
+            records: page === 0 ? [savedRow, ...current.records].slice(0, PAGE_SIZE) : current.records,
+            total: current.total + (editor.mode === "create" ? 1 : 0)
+          };
+        });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["admin-crud", "options", selectedTable.name] });
       setNotice(
         editor.mode === "create"
           ? `${selectedTable.label} entry created.`
           : `${selectedTable.label} entry updated.`
       );
       closePanels();
-      await refreshRecords();
     } catch (apiError) {
       setError(getErrorMessage(apiError));
     } finally {
@@ -814,9 +865,11 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       setFacilityRelationsLoading(true);
       setError("");
 
-      await ensureFacilityRelationOptions();
-
-      const data = await api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`);
+      const data = await queryClient.fetchQuery({
+        queryKey: adminCrudQueryKeys.facilityRelations(facilityId),
+        queryFn: () => api<FacilityRelationsResponse>(`/api/facilities/${facilityId}/relations`),
+        staleTime: 30_000
+      });
       await hydrateFacilityRelationLabels(data);
       setFacilityRelationsDraft({
         chemistries: data.chemistries.map((row) => ({
@@ -858,14 +911,6 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     ]);
   }
 
-  async function ensureFacilityRelationOptions() {
-    await Promise.all(
-      RELATION_KEYS.filter((key) => !lookups[RELATION_TABLE_BY_KEY[key]]).map(async (key) => {
-        await loadRelationOptions(key);
-      })
-    );
-  }
-
   async function handleDeleteRecord(row: RowRecord) {
     if (!selectedTable) {
       return;
@@ -887,12 +932,20 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       });
 
       const deletedRowKey = createRowKey(selectedTable, row, -1);
-      setRecords((currentRecords) =>
-        currentRecords.filter(
-          (currentRow, index) => createRowKey(selectedTable, currentRow, index) !== deletedRowKey
-        )
-      );
-      setTotal((currentTotal) => Math.max(0, currentTotal - 1));
+      if (activeRecordsQueryKey) {
+        queryClient.setQueryData<RecordsResponse>(activeRecordsQueryKey, (current) =>
+          current
+            ? {
+                ...current,
+                records: current.records.filter(
+                  (currentRow, index) => createRowKey(selectedTable, currentRow, index) !== deletedRowKey
+                ),
+                total: Math.max(0, current.total - 1)
+              }
+            : current
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ["admin-crud", "options", selectedTable.name] });
       setNotice(`${selectedTable.label} entry deleted.`);
     } catch (apiError) {
       setError(getErrorMessage(apiError));
@@ -906,13 +959,9 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       return;
     }
 
-    const data = await api<RecordsResponse>(
-      `/api/records/${selectedTable.name}?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}&search=${encodeURIComponent(
-        appliedSearch
-      )}`
-    );
-    setRecords(data.records);
-    setTotal(data.total);
+    await queryClient.invalidateQueries({
+      queryKey: ["admin-crud", "records", selectedTable.name]
+    });
   }
 
   async function handleRefreshClick() {
@@ -989,7 +1038,10 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
         `Imported ${response.processed} entries into ${selectedTable.label} (${response.created} created, ${response.updated} updated).`
       );
       closePanels();
-      await refreshRecords();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-crud", "records", selectedTable.name] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-crud", "options", selectedTable.name] })
+      ]);
     } catch (apiError) {
       setError(getErrorMessage(apiError));
     } finally {
@@ -2382,7 +2434,7 @@ async function fetchRecordsForExport(tableName: string, search: string): Promise
 
   while (true) {
     const data = await api<RecordsResponse>(
-      `/api/records/${tableName}?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}`
+      `/api/records/${tableName}?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}&view=export`
     );
     rows.push(...data.records);
     offset += data.records.length;

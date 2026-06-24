@@ -1,6 +1,6 @@
 import { Show, SignOutButton, useAuth, useUser } from "@clerk/react";
 import { LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
-import { Component, lazy, Suspense, useEffect, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import type { AdminMeResponse } from "../shared/types";
 import SignInDialog from "./SignInDialog";
@@ -33,6 +33,7 @@ function AdminGate() {
   const [adminUser, setAdminUser] = useState<AdminMeResponse["user"] | null>(null);
   const [status, setStatus] = useState<"loading" | "authorized" | "forbidden" | "error">("loading");
   const [message, setMessage] = useState("");
+  const bootstrapUserId = useRef<string | null>(null);
   const userId = user?.id;
   const userEmail = user?.primaryEmailAddress?.emailAddress;
   const userFirstName = user?.firstName;
@@ -46,18 +47,22 @@ function AdminGate() {
   }, [getToken]);
 
   useEffect(() => {
-    if (!isLoaded || !isUserLoaded || !user) {
+    if (!isLoaded || !isUserLoaded || !userId) {
+      return;
+    }
+    if (bootstrapUserId.current === userId && status !== "error" && status !== "forbidden") {
       return;
     }
 
     let cancelled = false;
+    bootstrapUserId.current = userId ?? null;
 
     async function loadAdminAccess() {
       try {
         setStatus((current) => (current === "authorized" ? current : "loading"));
         setMessage("");
 
-        await apiRequest<{ id: string }>("/api/users/sync", {
+        const data = await apiRequest<AdminMeResponse & { id: string }>("/api/users/sync", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -71,8 +76,6 @@ function AdminGate() {
           })
         });
 
-        const data = await apiRequest<AdminMeResponse>("/api/auth/me");
-
         if (!cancelled) {
           setAdminUser(data.user);
           setStatus("authorized");
@@ -82,6 +85,7 @@ function AdminGate() {
           const message = error instanceof Error ? error.message : "Unable to verify admin access.";
           setStatus(message === "Admin access is required." ? "forbidden" : "error");
           setMessage(message);
+          bootstrapUserId.current = null;
         }
       }
     }
@@ -100,7 +104,8 @@ function AdminGate() {
     userFirstName,
     userLastName,
     userImageUrl,
-    userEmailVerified
+    userEmailVerified,
+    status
   ]);
 
   if (!isLoaded || !isUserLoaded || status === "loading") {

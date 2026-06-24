@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   FacilityRelationsResponse,
   FacilityRelationsUpsertRequest,
@@ -13,8 +13,8 @@ export const adminCrudQueryKeys = {
   schema: ["admin-crud", "schema"] as const,
   records: (tableName: string, page: number, pageSize: number, search: string) =>
     ["admin-crud", "records", tableName, page, pageSize, search] as const,
-  options: (tableName: string, search = "", variant = "", ids = "") =>
-    ["admin-crud", "options", tableName, search, variant, ids] as const,
+  options: (tableName: string, search = "", variant = "", ids = "", limit = 50) =>
+    ["admin-crud", "options", tableName, search, variant, ids, limit] as const,
   facilityRelations: (facilityId: string) => ["admin-crud", "facility-relations", facilityId] as const
 };
 
@@ -38,7 +38,8 @@ export function useRecordsQuery(
     queryFn: () =>
       apiRequest<RecordsResponse>(
         `/api/records/${tableName}?limit=${pageSize}&offset=${page * pageSize}&search=${encodeURIComponent(search)}`
-      )
+      ),
+    placeholderData: keepPreviousData
   });
 }
 
@@ -59,14 +60,15 @@ export function useOptionsQuery({
 }) {
   return useQuery({
     enabled: enabled && Boolean(tableName),
-    queryKey: adminCrudQueryKeys.options(tableName, search, variant, ids),
+    queryKey: adminCrudQueryKeys.options(tableName, search, variant, ids, limit),
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(limit) });
       if (ids) params.set("ids", ids);
       if (search) params.set("search", search);
       if (variant) params.set("variant", variant);
       return apiRequest<OptionsResponse>(`/api/options/${tableName}?${params.toString()}`);
-    }
+    },
+    placeholderData: keepPreviousData
   });
 }
 
