@@ -14,9 +14,11 @@
   },
   "dependencies": {
     "@clerk/react": "^6.7.2",
+    "@radix-ui/react-dialog": "^1.1.17",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "lucide-react": "^1.21.0",
     "pg": "^8.22.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

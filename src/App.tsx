@@ -1,7 +1,9 @@
-import { Show, SignInButton, SignOutButton, useAuth, useUser } from "@clerk/react";
+import { Show, SignOutButton, useAuth, useUser } from "@clerk/react";
+import { LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import AdminConsole from "./AdminConsole";
+import SignInDialog from "./SignInDialog";
 
 interface AdminMeResponse {
   user: {
@@ -18,16 +20,11 @@ export default function App() {
     <>
       <Show when="signed-out">
         <AuthScreen
-          action={
-            <SignInButton mode="modal">
-              <button className="primary-button auth-action" type="button">
-                Sign in
-              </button>
-            </SignInButton>
-          }
+          action={<SignInDialog />}
           eyebrow="Admin Access"
           title="Covenants Admin Platform"
           message="Sign in with your authorized admin account to continue."
+          variant="sign-in"
         />
       </Show>
       <Show when="signed-in">
@@ -126,6 +123,7 @@ function AdminGate() {
         eyebrow="Checking Access"
         title="Verifying admin role"
         message="Confirming your account has access to this admin area."
+        variant="loading"
       />
     );
   }
@@ -135,7 +133,7 @@ function AdminGate() {
       <AuthScreen
         action={
           <SignOutButton>
-            <button className="ghost-button auth-action" type="button">
+            <button className="auth-ghost-button auth-trigger auth-state-action" type="button">
               Sign out
             </button>
           </SignOutButton>
@@ -143,6 +141,7 @@ function AdminGate() {
         eyebrow="Access Denied"
         title="Admin role required"
         message={message || "Your account is signed in, but it is not assigned the admin role."}
+        variant="forbidden"
       />
     );
   }
@@ -152,7 +151,7 @@ function AdminGate() {
       <AuthScreen
         action={
           <SignOutButton>
-            <button className="ghost-button auth-action" type="button">
+            <button className="auth-ghost-button auth-trigger auth-state-action" type="button">
               Sign out
             </button>
           </SignOutButton>
@@ -160,6 +159,7 @@ function AdminGate() {
         eyebrow="Auth Error"
         title="Could not verify access"
         message={message}
+        variant="error"
       />
     );
   }
@@ -171,16 +171,29 @@ function AuthScreen({
   action,
   eyebrow,
   message,
-  title
+  title,
+  variant = "sign-in"
 }: {
   action?: ReactNode;
   eyebrow: string;
   message: string;
   title: string;
+  variant?: "sign-in" | "loading" | "forbidden" | "error";
 }) {
+  const icon =
+    variant === "loading" ? (
+      <LoaderCircle className="auth-state-spinner" aria-hidden="true" />
+    ) : variant === "forbidden" ? (
+      <ShieldCheck aria-hidden="true" />
+    ) : variant === "error" ? (
+      <TriangleAlert aria-hidden="true" />
+    ) : null;
+
   return (
     <main className="auth-screen">
+      <div className="auth-screen-background" />
       <section className="auth-panel">
+        {icon ? <div className="auth-brand-icon">{icon}</div> : null}
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>
         <p>{message}</p>
