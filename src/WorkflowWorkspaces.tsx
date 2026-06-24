@@ -1,6 +1,7 @@
+import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { AlertTriangle, Check, ChevronRight, CircleDollarSign, Mail, Plus, Search, Send, Upload, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, CircleDollarSign, Mail, Plus, Search, Send, Trash2, Upload, X } from "lucide-react";
 
 type RecordValue = Record<string, any>;
 
@@ -651,95 +652,167 @@ function CreateEnquiryDialog({ onClose, onCreated }: { onClose: () => void; onCr
   }
 
   return (
-    <div className="overlay">
-      <form className="dialog enquiry-dialog" onSubmit={submit}>
-        <div className="dialog-head"><div><p className="eyebrow">New workflow</p><h3>Create enquiry</h3><p className="dialog-copy">Add the customer once, then one or more requested materials.</p></div><button className="close-button" onClick={onClose} type="button"><X size={18} /></button></div>
-        {error ? <p className="banner error">{error}</p> : null}
-        <div className="form-grid">
-          <Field label="Customer name"><input required value={header.customerName} onChange={(e) => setHeader({ ...header, customerName: e.target.value })} /></Field>
-          <Field label="Customer company"><input value={header.customerCompany} onChange={(e) => setHeader({ ...header, customerCompany: e.target.value })} /></Field>
-          <Field label="Customer email"><input type="email" value={header.customerEmail} onChange={(e) => setHeader({ ...header, customerEmail: e.target.value })} /></Field>
-          <Field label="External reference"><input value={header.externalReference} onChange={(e) => setHeader({ ...header, externalReference: e.target.value })} /></Field>
-          <Field label="Received date"><input required type="date" value={header.receivedAt} onChange={(e) => setHeader({ ...header, receivedAt: e.target.value })} /></Field>
-          <Field label="Enquiry type"><input value={header.enquiryType} onChange={(e) => setHeader({ ...header, enquiryType: e.target.value })} /></Field>
-        </div>
-        <Field label="Notes"><textarea rows={2} value={header.notes} onChange={(e) => setHeader({ ...header, notes: e.target.value })} /></Field>
-        <div className="line-item-head"><div><p className="eyebrow">Requested materials</p><h4>{items.length} item{items.length === 1 ? "" : "s"}</h4></div><button className="ghost-button" onClick={() => setItems([...items, { ...EMPTY_ITEM }])} type="button"><Plus size={15} /> Add item</button></div>
-        <div className="draft-item-list">
-          {items.map((item, index) => (
-            <section className="draft-item" key={index}>
-              <div className="draft-item-number">{index + 1}</div>
-              <div className="draft-item-fields">
-                <Field label="Product or material">
-                  <div className="product-autocomplete">
-                    <input required={!item.casNumber} value={item.productName} onChange={(e) => void searchProduct(index, e.target.value)} placeholder="Search Supabase catalog…" />
-                    {results[index]?.length ? <div className="autocomplete-results">{results[index].map((product) => <button key={product.id} onClick={() => { updateItem(index, { productId: product.id, productName: product.product_name, casNumber: product.cas_number || "" }); setResults((current) => ({ ...current, [index]: [] })); }} type="button"><strong>{product.product_name}</strong><span>{product.cas_number || "No CAS"}{product.is_controlled ? " · Controlled" : ""}</span></button>)}</div> : null}
-                  </div>
-                </Field>
-                <Field label="CAS number"><input value={item.casNumber} onChange={(e) => updateItem(index, { casNumber: e.target.value, productId: "" })} /></Field>
-                <Field label="Quantity"><input min="0" step="any" type="number" value={item.quantity} onChange={(e) => updateItem(index, { quantity: e.target.value })} /></Field>
-                <Field label="Unit"><select value={item.unit} onChange={(e) => updateItem(index, { unit: e.target.value })}><option value="g">g</option><option value="kg">kg</option><option value="MT">MT</option><option value="L">L</option><option value="KL">KL</option></select></Field>
-                <Field label="Remarks"><input value={item.remarks} onChange={(e) => updateItem(index, { remarks: e.target.value })} /></Field>
-                <div className="additional-quantities">
-                  {item.additionalQuantities.map((quantity, quantityIndex) => (
-                    <div className="additional-quantity" key={quantityIndex}>
-                      <input
-                        aria-label={`Additional quantity ${quantityIndex + 1}`}
-                        min="0"
-                        placeholder="Quantity"
-                        step="any"
-                        type="number"
-                        value={quantity.quantity}
-                        onChange={(event) =>
-                          updateItem(index, {
-                            additionalQuantities: item.additionalQuantities.map((entry, entryIndex) =>
-                              entryIndex === quantityIndex ? { ...entry, quantity: event.target.value } : entry
-                            )
-                          })
-                        }
-                      />
-                      <select
-                        aria-label={`Additional unit ${quantityIndex + 1}`}
-                        value={quantity.unit}
-                        onChange={(event) =>
-                          updateItem(index, {
-                            additionalQuantities: item.additionalQuantities.map((entry, entryIndex) =>
-                              entryIndex === quantityIndex ? { ...entry, unit: event.target.value } : entry
-                            )
-                          })
-                        }
-                      >
-                        <option value="g">g</option><option value="kg">kg</option><option value="MT">MT</option><option value="L">L</option><option value="KL">KL</option>
-                      </select>
-                      <button
-                        aria-label={`Remove additional quantity ${quantityIndex + 1}`}
-                        onClick={() =>
-                          updateItem(index, {
-                            additionalQuantities: item.additionalQuantities.filter((_, entryIndex) => entryIndex !== quantityIndex)
-                          })
-                        }
-                        type="button"
-                      ><X size={14} /></button>
-                    </div>
-                  ))}
-                  <button
-                    className="add-quantity-button"
-                    onClick={() =>
-                      updateItem(index, {
-                        additionalQuantities: [...item.additionalQuantities, { quantity: "", unit: "kg" }]
-                      })
-                    }
-                    type="button"
-                  ><Plus size={14} /> Add quantity</button>
-                </div>
+    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="enquiry-dialog-overlay" />
+        <Dialog.Content asChild>
+          <form className="enquiry-dialog-content" onSubmit={submit}>
+            <header className="enquiry-dialog-header">
+              <div className="enquiry-dialog-title-icon"><Plus size={20} /></div>
+              <div>
+                <p className="eyebrow">New workflow</p>
+                <Dialog.Title>Create enquiry</Dialog.Title>
+                <Dialog.Description>
+                  Add the customer details, then list each requested material.
+                </Dialog.Description>
               </div>
-              {items.length > 1 ? <button aria-label={`Remove item ${index + 1}`} className="remove-item" onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))} type="button"><X size={16} /></button> : null}
-            </section>
-          ))}
-        </div>
-        <div className="dialog-actions dialog-footer"><button className="ghost-button" onClick={onClose} type="button">Cancel</button><button className="primary-button" disabled={busy} type="submit">{busy ? "Creating…" : "Create enquiry"}</button></div>
-      </form>
-    </div>
+              <Dialog.Close className="enquiry-dialog-close" aria-label="Close" type="button">
+                <X size={18} />
+              </Dialog.Close>
+            </header>
+
+            <div className="enquiry-dialog-body">
+              {error ? <p className="banner error">{error}</p> : null}
+
+              <section className="enquiry-form-section">
+                <div className="enquiry-section-heading">
+                  <div>
+                    <span>01</span>
+                    <div>
+                      <h4>Customer details</h4>
+                      <p>Contact and reference information for this enquiry.</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="enquiry-customer-grid">
+                  <Field label="Customer name"><input required value={header.customerName} onChange={(e) => setHeader({ ...header, customerName: e.target.value })} /></Field>
+                  <Field label="Customer company"><input value={header.customerCompany} onChange={(e) => setHeader({ ...header, customerCompany: e.target.value })} /></Field>
+                  <Field label="Customer email"><input type="email" value={header.customerEmail} onChange={(e) => setHeader({ ...header, customerEmail: e.target.value })} /></Field>
+                  <Field label="External reference"><input value={header.externalReference} onChange={(e) => setHeader({ ...header, externalReference: e.target.value })} /></Field>
+                  <Field label="Received date"><input required type="date" value={header.receivedAt} onChange={(e) => setHeader({ ...header, receivedAt: e.target.value })} /></Field>
+                  <Field label="Enquiry type"><input value={header.enquiryType} onChange={(e) => setHeader({ ...header, enquiryType: e.target.value })} /></Field>
+                  <div className="enquiry-notes-field">
+                    <Field label="Notes"><textarea rows={3} value={header.notes} onChange={(e) => setHeader({ ...header, notes: e.target.value })} /></Field>
+                  </div>
+                </div>
+              </section>
+
+              <section className="enquiry-form-section">
+                <div className="enquiry-section-heading">
+                  <div>
+                    <span>02</span>
+                    <div>
+                      <h4>Requested materials</h4>
+                      <p>{items.length} item{items.length === 1 ? "" : "s"} in this enquiry.</p>
+                    </div>
+                  </div>
+                  <button className="ghost-button" onClick={() => setItems([...items, { ...EMPTY_ITEM }])} type="button">
+                    <Plus size={15} /> Add item
+                  </button>
+                </div>
+
+                <div className="draft-item-list">
+                  {items.map((item, index) => (
+                    <section className="draft-item" key={index}>
+                      <div className="draft-item-heading">
+                        <span className="draft-item-number">{index + 1}</span>
+                        <strong>Material {index + 1}</strong>
+                        {items.length > 1 ? (
+                          <button
+                            aria-label={`Remove item ${index + 1}`}
+                            className="remove-item"
+                            onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))}
+                            type="button"
+                          >
+                            <Trash2 size={14} />
+                            <span>Remove</span>
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="draft-item-fields">
+                        <div className="draft-product-field">
+                          <Field label="Product or material">
+                            <div className="product-autocomplete">
+                              <input required={!item.casNumber} value={item.productName} onChange={(e) => void searchProduct(index, e.target.value)} placeholder="Search product catalog…" />
+                              {results[index]?.length ? <div className="autocomplete-results">{results[index].map((product) => <button key={product.id} onClick={() => { updateItem(index, { productId: product.id, productName: product.product_name, casNumber: product.cas_number || "" }); setResults((current) => ({ ...current, [index]: [] })); }} type="button"><strong>{product.product_name}</strong><span>{product.cas_number || "No CAS"}{product.is_controlled ? " · Controlled" : ""}</span></button>)}</div> : null}
+                            </div>
+                          </Field>
+                        </div>
+                        <Field label="CAS number"><input value={item.casNumber} onChange={(e) => updateItem(index, { casNumber: e.target.value, productId: "" })} /></Field>
+                        <Field label="Quantity"><input min="0" step="any" type="number" value={item.quantity} onChange={(e) => updateItem(index, { quantity: e.target.value })} /></Field>
+                        <Field label="Unit"><select value={item.unit} onChange={(e) => updateItem(index, { unit: e.target.value })}><option value="g">g</option><option value="kg">kg</option><option value="MT">MT</option><option value="L">L</option><option value="KL">KL</option></select></Field>
+                        <div className="draft-remarks-field">
+                          <Field label="Remarks"><input value={item.remarks} onChange={(e) => updateItem(index, { remarks: e.target.value })} /></Field>
+                        </div>
+                        <div className="additional-quantities">
+                          {item.additionalQuantities.map((quantity, quantityIndex) => (
+                            <div className="additional-quantity" key={quantityIndex}>
+                              <input
+                                aria-label={`Additional quantity ${quantityIndex + 1}`}
+                                min="0"
+                                placeholder="Quantity"
+                                step="any"
+                                type="number"
+                                value={quantity.quantity}
+                                onChange={(event) =>
+                                  updateItem(index, {
+                                    additionalQuantities: item.additionalQuantities.map((entry, entryIndex) =>
+                                      entryIndex === quantityIndex ? { ...entry, quantity: event.target.value } : entry
+                                    )
+                                  })
+                                }
+                              />
+                              <select
+                                aria-label={`Additional unit ${quantityIndex + 1}`}
+                                value={quantity.unit}
+                                onChange={(event) =>
+                                  updateItem(index, {
+                                    additionalQuantities: item.additionalQuantities.map((entry, entryIndex) =>
+                                      entryIndex === quantityIndex ? { ...entry, unit: event.target.value } : entry
+                                    )
+                                  })
+                                }
+                              >
+                                <option value="g">g</option><option value="kg">kg</option><option value="MT">MT</option><option value="L">L</option><option value="KL">KL</option>
+                              </select>
+                              <button
+                                aria-label={`Remove additional quantity ${quantityIndex + 1}`}
+                                onClick={() =>
+                                  updateItem(index, {
+                                    additionalQuantities: item.additionalQuantities.filter((_, entryIndex) => entryIndex !== quantityIndex)
+                                  })
+                                }
+                                type="button"
+                              ><X size={14} /></button>
+                            </div>
+                          ))}
+                          <button
+                            className="add-quantity-button"
+                            onClick={() =>
+                              updateItem(index, {
+                                additionalQuantities: [...item.additionalQuantities, { quantity: "", unit: "kg" }]
+                              })
+                            }
+                            type="button"
+                          ><Plus size={14} /> Add another quantity</button>
+                        </div>
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <footer className="enquiry-dialog-footer">
+              <button className="ghost-button" onClick={onClose} type="button">Cancel</button>
+              <button className="primary-button" disabled={busy} type="submit">
+                {busy ? "Creating…" : "Create enquiry"}
+              </button>
+            </footer>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 

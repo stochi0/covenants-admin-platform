@@ -13,7 +13,8 @@ import {
   Inbox,
   MapPinned,
   PackageSearch,
-  ShieldAlert
+  ShieldAlert,
+  UserRound
 } from "lucide-react";
 import type {
   ColumnMeta,
@@ -27,6 +28,7 @@ import type {
   TableMeta
 } from "../shared/types";
 import { DispatchHistoryWorkspace, EnquiriesWorkspace, OverviewWorkspace } from "./WorkflowWorkspaces";
+import ProfileWorkspace from "./ProfileWorkspace";
 
 type RowRecord = Record<string, unknown>;
 type FormState = Record<string, string>;
@@ -77,13 +79,17 @@ const EMPTY_RELATION_OPTIONS: Record<RelationSearchKey, OptionsResponse["options
 
 interface AdminConsoleProps {
   adminUser?: {
+    id: string;
     email: string | null;
     firstName: string | null;
     lastName: string | null;
+    imageUrl: string | null;
+    role: "admin";
   } | null;
+  onAdminUserChange: (user: NonNullable<AdminConsoleProps["adminUser"]>) => void;
 }
 
-export default function AdminConsole({ adminUser }: AdminConsoleProps) {
+export default function AdminConsole({ adminUser, onAdminUserChange }: AdminConsoleProps) {
   const [tables, setTables] = useState<TableMeta[]>([]);
   const [selectedTableName, setSelectedTableName] = useState<string>("");
   const [activeView, setActiveView] = useState(() => readWorkspaceHash());
@@ -1073,16 +1079,14 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
             ]}
             onSelect={(id) => selectNavigationView(id)}
           />
+          <NavigationGroup
+            activeView={activeView}
+            collapsed={sidebarCollapsed}
+            label="Account"
+            items={[{ id: "profile", label: "Profile", icon: <UserRound size={18} /> }]}
+            onSelect={(id) => navigateWorkspace(id, setActiveView)}
+          />
         </nav>
-
-        <div className="admin-session">
-          <span className="admin-avatar">{getAdminInitials(adminUser)}</span>
-          <span className="admin-session-copy">
-            <strong>{getAdminDisplayName(adminUser)}</strong>
-            <small>Administrator</small>
-          </span>
-          <button onClick={() => void window.Clerk?.signOut()} type="button">Sign out</button>
-        </div>
       </aside>
 
       <main className="workspace">
@@ -1092,6 +1096,11 @@ export default function AdminConsole({ adminUser }: AdminConsoleProps) {
           <EnquiriesWorkspace />
         ) : activeView === "dispatches" ? (
           <DispatchHistoryWorkspace />
+        ) : activeView === "profile" ? (
+          <ProfileWorkspace
+            adminUser={adminUser}
+            onAdminUserChange={onAdminUserChange}
+          />
         ) : (
           <>
         <section className="workspace-header">
@@ -2463,19 +2472,6 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   return data;
-}
-
-function getAdminDisplayName(adminUser: AdminConsoleProps["adminUser"]) {
-  const name = [adminUser?.firstName, adminUser?.lastName].filter(Boolean).join(" ");
-  return name || adminUser?.email || "Admin";
-}
-
-function getAdminInitials(adminUser: AdminConsoleProps["adminUser"]) {
-  const initials = [adminUser?.firstName, adminUser?.lastName]
-    .filter(Boolean)
-    .map((value) => value!.slice(0, 1).toUpperCase())
-    .join("");
-  return initials || adminUser?.email?.slice(0, 1).toUpperCase() || "A";
 }
 
 function NavigationGroup({

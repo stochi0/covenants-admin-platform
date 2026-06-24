@@ -11,6 +11,7 @@ interface AdminMeResponse {
     email: string | null;
     firstName: string | null;
     lastName: string | null;
+    imageUrl: string | null;
     role: "admin";
   };
 }
@@ -68,7 +69,7 @@ function AdminGate() {
             email: user.primaryEmailAddress?.emailAddress,
             firstName: user.firstName,
             lastName: user.lastName,
-            imageUrl: user.imageUrl,
+            imageUrl: user.hasImage ? user.imageUrl : null,
             emailVerified: user.primaryEmailAddress?.verification?.status === "verified"
           })
         });
@@ -164,7 +165,7 @@ function AdminGate() {
     );
   }
 
-  return <AdminConsole adminUser={adminUser} />;
+  return <AdminConsole adminUser={adminUser} onAdminUserChange={setAdminUser} />;
 }
 
 function AuthScreen({
