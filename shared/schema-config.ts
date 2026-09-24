@@ -80,7 +80,13 @@ export const schemaTables: TableMeta[] = [
         searchable: true,
         importBehavior: "merge_email_list"
       }),
-      ...timestamps
+      ...timestamps,
+      column("deleted_at", {
+        kind: "timestamp",
+        sqlType: "timestamp with time zone",
+        nullable: true,
+        hidden: true
+      })
     ]
   },
   {
@@ -195,7 +201,13 @@ export const schemaTables: TableMeta[] = [
       column("iso_code", { label: "ISO Code", nullable: true, searchable: true }),
       column("name", { searchable: true }),
       column("country", { hasDefault: true, searchable: true }),
-      ...timestamps
+      ...timestamps,
+      column("deleted_at", {
+        kind: "timestamp",
+        sqlType: "timestamp with time zone",
+        nullable: true,
+        hidden: true
+      })
     ]
   },
   {
@@ -210,7 +222,13 @@ export const schemaTables: TableMeta[] = [
       prefixedPrimaryKey,
       column("slug", { searchable: true }),
       column("label", { searchable: true }),
-      ...timestamps
+      ...timestamps,
+      column("deleted_at", {
+        kind: "timestamp",
+        sqlType: "timestamp with time zone",
+        nullable: true,
+        hidden: true
+      })
     ]
   },
   {
@@ -225,7 +243,13 @@ export const schemaTables: TableMeta[] = [
       prefixedPrimaryKey,
       column("code", { searchable: true }),
       column("label", { searchable: true }),
-      ...timestamps
+      ...timestamps,
+      column("deleted_at", {
+        kind: "timestamp",
+        sqlType: "timestamp with time zone",
+        nullable: true,
+        hidden: true
+      })
     ]
   },
   {
@@ -256,7 +280,13 @@ export const schemaTables: TableMeta[] = [
       column("reason", { nullable: true, searchable: true }),
       column("scomet_entry", { label: "SCOMET Entry", nullable: true, searchable: true }),
       column("is_active", { label: "Active", kind: "boolean", sqlType: "boolean", hasDefault: true }),
-      ...timestamps
+      ...timestamps,
+      column("deleted_at", {
+        kind: "timestamp",
+        sqlType: "timestamp with time zone",
+        nullable: true,
+        hidden: true
+      })
     ]
   },
   {

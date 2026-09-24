@@ -11,8 +11,13 @@ import { apiRequest } from "../../lib/api";
 
 export const adminCrudQueryKeys = {
   schema: ["admin-crud", "schema"] as const,
-  records: (tableName: string, page: number, pageSize: number, search: string) =>
-    ["admin-crud", "records", tableName, page, pageSize, search] as const,
+  records: (
+    tableName: string,
+    page: number,
+    pageSize: number,
+    search: string,
+    status: "active" | "deleted"
+  ) => ["admin-crud", "records", tableName, page, pageSize, search, status] as const,
   options: (tableName: string, search = "", variant = "", ids = "", limit = 50) =>
     ["admin-crud", "options", tableName, search, variant, ids, limit] as const,
   facilityRelations: (facilityId: string) => ["admin-crud", "facility-relations", facilityId] as const
@@ -30,16 +35,16 @@ export function useRecordsQuery(
   page: number,
   pageSize: number,
   search: string,
+  status: "active" | "deleted",
   enabled = true
 ) {
   return useQuery({
     enabled: enabled && Boolean(tableName),
-    queryKey: adminCrudQueryKeys.records(tableName, page, pageSize, search),
+    queryKey: adminCrudQueryKeys.records(tableName, page, pageSize, search, status),
     queryFn: () =>
       apiRequest<RecordsResponse>(
-        `/api/records/${tableName}?limit=${pageSize}&offset=${page * pageSize}&search=${encodeURIComponent(search)}`
-      ),
-    placeholderData: keepPreviousData
+        `/api/records/${tableName}?limit=${pageSize}&offset=${page * pageSize}&search=${encodeURIComponent(search)}&status=${status}`
+      )
   });
 }
 

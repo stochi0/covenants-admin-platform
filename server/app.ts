@@ -11,10 +11,18 @@ import {
   getTables,
   importRecords,
   listRecords,
+  restoreRecord,
+  softDeleteRecord,
   upsertFacilityRelations,
   updateRecord
 } from "./modules/records.js";
-import { authenticateAdmin, clearAdminCache, requireAdmin, verifyClerkHeaders, type AuthenticatedAdminRequest } from "./auth.js";
+import {
+  authenticateAdmin,
+  clearAdminCache,
+  requireAdmin,
+  verifyClerkHeaders,
+  type AuthenticatedAdminRequest
+} from "./auth.js";
 import {
   createEnquiry,
   getDashboardMetrics,
@@ -247,7 +255,8 @@ app.get("/api/records/:table", async (req, res) => {
     const offset = clampNumber(req.query.offset, 0, 0, 10_000);
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
     const includeAllColumns = req.query.view === "export";
-    const data = await listRecords(req.params.table, { includeAllColumns, limit, offset, search });
+    const status = req.query.status === "deleted" ? "deleted" : "active";
+    const data = await listRecords(req.params.table, { includeAllColumns, limit, offset, search, status });
     res.json(data);
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });
@@ -275,6 +284,24 @@ app.patch("/api/records/:table", async (req, res) => {
 app.delete("/api/records/:table", async (req, res) => {
   try {
     await deleteRecord(req.params.table, req.body ?? {});
+    res.status(204).end();
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/records/:table/soft-delete", async (req, res) => {
+  try {
+    await softDeleteRecord(req.params.table, req.body ?? {});
+    res.status(204).end();
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/records/:table/restore", async (req, res) => {
+  try {
+    await restoreRecord(req.params.table, req.body ?? {});
     res.status(204).end();
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });

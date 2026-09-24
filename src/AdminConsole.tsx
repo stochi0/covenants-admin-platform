@@ -34,11 +34,8 @@ import { getErrorMessage } from "./lib/errors";
 import { NavigationGroup } from "./app/AdminShell";
 import { DataTable } from "./components/DataTable";
 import { StatusBanner } from "./components/StatusBanner";
-import {
-  adminCrudQueryKeys,
-  useRecordsQuery,
-  useSchemaQuery
-} from "./features/admin-crud/hooks";
+import { adminCrudQueryKeys, useRecordsQuery, useSchemaQuery } from "./features/admin-crud/hooks";
+import { runRecordAction, type RecordAction } from "./features/admin-crud/record-actions";
 
 const OverviewWorkspace = lazy(() => import("./features/workflow/OverviewWorkspace"));
 const EnquiriesWorkspace = lazy(() => import("./features/workflow/EnquiriesWorkspace"));
@@ -107,6 +104,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
+  const [recordStatus, setRecordStatus] = useState<"active" | "deleted">("active");
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -146,9 +144,17 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     () => tables.find((table) => table.name === selectedTableName) ?? null,
     [selectedTableName, tables]
   );
-  const recordsQuery = useRecordsQuery(selectedTable?.name ?? "", page, PAGE_SIZE, appliedSearch, isTableView);
+  const effectiveRecordStatus = selectedTable?.readOnly ? "active" : recordStatus;
+  const recordsQuery = useRecordsQuery(
+    selectedTable?.name ?? "",
+    page,
+    PAGE_SIZE,
+    appliedSearch,
+    effectiveRecordStatus,
+    isTableView
+  );
   const activeRecordsQueryKey = selectedTable
-    ? adminCrudQueryKeys.records(selectedTable.name, page, PAGE_SIZE, appliedSearch)
+    ? adminCrudQueryKeys.records(selectedTable.name, page, PAGE_SIZE, appliedSearch, effectiveRecordStatus)
     : null;
   const records = useMemo(() => recordsQuery.data?.records ?? [], [recordsQuery.data?.records]);
   const total = recordsQuery.data?.total ?? 0;
@@ -245,36 +251,39 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     mergeLookupOptions(tableName, data.options);
   }
 
-  const loadRelationOptions = useCallback(async (key: RelationSearchKey, search = "", signal?: AbortSignal) => {
-    setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: true }));
+  const loadRelationOptions = useCallback(
+    async (key: RelationSearchKey, search = "", signal?: AbortSignal) => {
+      setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: true }));
 
-    const tableName = RELATION_TABLE_BY_KEY[key];
-    const query = search.trim();
-    if (key === "products" && query.length < 2) {
+      const tableName = RELATION_TABLE_BY_KEY[key];
+      const query = search.trim();
+      if (key === "products" && query.length < 2) {
+        setFacilityRelationOptions((current) => ({
+          ...current,
+          [key]: []
+        }));
+        setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
+        return [];
+      }
+
+      const data = await fetchOptions(tableName, {
+        limit: RELATION_OPTION_LIMIT,
+        search: query,
+        signal,
+        variant: key === "products" ? "facility_relation" : ""
+      });
+
       setFacilityRelationOptions((current) => ({
         ...current,
-        [key]: []
+        [key]: data.options
       }));
+      mergeLookupOptions(tableName, data.options);
       setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
-      return [];
-    }
 
-    const data = await fetchOptions(tableName, {
-      limit: RELATION_OPTION_LIMIT,
-      search: query,
-      signal,
-      variant: key === "products" ? "facility_relation" : ""
-    });
-
-    setFacilityRelationOptions((current) => ({
-      ...current,
-      [key]: data.options
-    }));
-    mergeLookupOptions(tableName, data.options);
-    setFacilityRelationOptionsLoading((current) => ({ ...current, [key]: false }));
-
-    return data.options;
-  }, [fetchOptions, mergeLookupOptions]);
+      return data.options;
+    },
+    [fetchOptions, mergeLookupOptions]
+  );
 
   async function quickCreateRelationOption(
     key: RelationSearchKey,
@@ -396,7 +405,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       setSelectedTableName(
         schemaQuery.data.tables.some((table) => table.name === requestedTable)
           ? requestedTable
-          : schemaQuery.data.tables[0]?.name ?? ""
+          : (schemaQuery.data.tables[0]?.name ?? "")
       );
     }
   }, [schemaQuery.data?.tables, selectedTableName]);
@@ -488,10 +497,14 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
       return [];
     }
 
-    return selectedTable.listColumns
+    const columnNames =
+      effectiveRecordStatus === "deleted"
+        ? [...selectedTable.listColumns, "deleted_at"]
+        : selectedTable.listColumns;
+    return columnNames
       .map((columnName) => selectedTable.columns.find((column) => column.name === columnName))
       .filter((column): column is ColumnMeta => Boolean(column));
-  }, [selectedTable]);
+  }, [effectiveRecordStatus, selectedTable]);
 
   const editableColumns = useMemo(() => {
     if (!selectedTable) {
@@ -664,6 +677,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
 
     startTransition(() => {
       setSelectedTableName(tableName);
+      setRecordStatus("active");
       setPage(0);
       setSearchInput("");
       setAppliedSearch("");
@@ -911,42 +925,32 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     ]);
   }
 
-  async function handleDeleteRecord(row: RowRecord) {
+  async function handleRecordAction(row: RowRecord, action: RecordAction) {
     if (!selectedTable) {
       return;
     }
 
     const identifier = getRowTitle(selectedTable, row, lookups);
-
-    if (!window.confirm(`Delete this entry?\n${identifier}`)) {
+    const actionLabel =
+      action === "delete" ? "Permanently delete" : action === "soft-delete" ? "Soft delete" : "Restore";
+    if (action !== "restore" && !window.confirm(`${actionLabel} this entry?\n${identifier}`)) {
       return;
     }
 
     try {
       setBusy(true);
       setError("");
-      await api(`/api/records/${selectedTable.name}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(row)
-      });
-
-      const deletedRowKey = createRowKey(selectedTable, row, -1);
-      if (activeRecordsQueryKey) {
-        queryClient.setQueryData<RecordsResponse>(activeRecordsQueryKey, (current) =>
-          current
-            ? {
-                ...current,
-                records: current.records.filter(
-                  (currentRow, index) => createRowKey(selectedTable, currentRow, index) !== deletedRowKey
-                ),
-                total: Math.max(0, current.total - 1)
-              }
-            : current
-        );
+      await runRecordAction(selectedTable, row, action);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-crud", "records", selectedTable.name] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-crud", "options", selectedTable.name] })
+      ]);
+      if (records.length === 1 && page > 0) {
+        setPage(page - 1);
       }
-      void queryClient.invalidateQueries({ queryKey: ["admin-crud", "options", selectedTable.name] });
-      setNotice(`${selectedTable.label} entry deleted.`);
+      setNotice(
+        `${selectedTable.label} entry ${action === "delete" ? "permanently deleted" : action === "soft-delete" ? "soft deleted" : "restored"}.`
+      );
     } catch (apiError) {
       setError(getErrorMessage(apiError));
     } finally {
@@ -988,7 +992,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
     try {
       setExporting(true);
       setError("");
-      const rows = await fetchRecordsForExport(selectedTable.name, appliedSearch);
+      const rows = await fetchRecordsForExport(selectedTable.name, appliedSearch, effectiveRecordStatus);
       const exportColumns = selectedTable.columns.filter((column) => !column.hidden);
       const worksheetRows = rows.map((row) =>
         Object.fromEntries(
@@ -1242,7 +1246,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
                 </button>
                 <button
                   className="ghost-button"
-                  disabled={selectedTable.readOnly}
+                  disabled={selectedTable.readOnly || recordStatus === "deleted"}
                   onClick={() =>
                     setImportState({
                       fileName: "",
@@ -1258,7 +1262,7 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
                 </button>
                 <button
                   className="primary-button"
-                  disabled={selectedTable.readOnly}
+                  disabled={selectedTable.readOnly || recordStatus === "deleted"}
                   onClick={openCreateEditor}
                   type="button"
                 >
@@ -1269,6 +1273,30 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
 
             <section className="panel controls">
               <div className="controls-copy">
+                {!selectedTable.readOnly ? (
+                  <div role="group" aria-label="Record status">
+                    <button
+                      className={recordStatus === "active" ? "ghost-button active" : "ghost-button"}
+                      onClick={() => {
+                        setRecordStatus("active");
+                        setPage(0);
+                      }}
+                      type="button"
+                    >
+                      Active
+                    </button>
+                    <button
+                      className={recordStatus === "deleted" ? "ghost-button active" : "ghost-button"}
+                      onClick={() => {
+                        setRecordStatus("deleted");
+                        setPage(0);
+                      }}
+                      type="button"
+                    >
+                      Deleted
+                    </button>
+                  </div>
+                ) : null}
                 <form className="search-form" onSubmit={handleSearchSubmit}>
                   <label className="search">
                     <span>Search entries</span>
@@ -1288,6 +1316,12 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
                 <p className="helper-note">
                   System-managed fields stay hidden. Imports ignore them even if they appear in the sheet.
                 </p>
+                {selectedTable.name === "controlled_substances" ? (
+                  <p className="helper-note">
+                    Soft deleted active CAS controls still block enquiry dispatches. Restore the entry and
+                    turn off Active to lift a restriction.
+                  </p>
+                ) : null}
               </div>
             </section>
 
@@ -1300,12 +1334,15 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
               formatColumnValue={formatColumnValue}
               loading={loadingRecords}
               lookups={lookups}
-              onDelete={(row) => void handleDeleteRecord(row)}
+              onDelete={(row) => void handleRecordAction(row, "delete")}
               onEdit={openEditEditor}
+              onRestore={(row) => void handleRecordAction(row, "restore")}
+              onSoftDelete={(row) => void handleRecordAction(row, "soft-delete")}
               page={page}
               pageCount={pageCount}
               records={records}
               setPage={setPage}
+              status={effectiveRecordStatus}
               table={selectedTable}
             />
           </>
@@ -2427,14 +2464,18 @@ function createRowKey(table: TableMeta, row: RowRecord, index: number) {
   return key || `${table.name}-${index}`;
 }
 
-async function fetchRecordsForExport(tableName: string, search: string): Promise<RowRecord[]> {
+async function fetchRecordsForExport(
+  tableName: string,
+  search: string,
+  status: "active" | "deleted"
+): Promise<RowRecord[]> {
   const rows: RowRecord[] = [];
   const limit = EXPORT_PAGE_SIZE;
   let offset = 0;
 
   while (true) {
     const data = await api<RecordsResponse>(
-      `/api/records/${tableName}?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}&view=export`
+      `/api/records/${tableName}?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}&view=export&status=${status}`
     );
     rows.push(...data.records);
     offset += data.records.length;

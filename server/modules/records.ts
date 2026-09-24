@@ -6,6 +6,8 @@ export {
   getTables,
   importRecords,
   listRecords,
+  restoreRecord,
+  softDeleteRecord,
   updateRecord,
   upsertFacilityRelations
 } from "../data.js";
