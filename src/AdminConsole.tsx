@@ -1274,9 +1274,10 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
             <section className="panel controls">
               <div className="controls-copy">
                 {!selectedTable.readOnly ? (
-                  <div role="group" aria-label="Record status">
+                  <div className="record-view-switch" role="group" aria-label="Record status">
                     <button
-                      className={recordStatus === "active" ? "ghost-button active" : "ghost-button"}
+                      className={`record-view-button${recordStatus === "active" ? " selected" : ""}`}
+                      aria-pressed={recordStatus === "active"}
                       onClick={() => {
                         setRecordStatus("active");
                         setPage(0);
@@ -1286,7 +1287,8 @@ export default function AdminConsole({ adminUser, onAdminUserChange }: AdminCons
                       Active
                     </button>
                     <button
-                      className={recordStatus === "deleted" ? "ghost-button active" : "ghost-button"}
+                      className={`record-view-button${recordStatus === "deleted" ? " selected" : ""}`}
+                      aria-pressed={recordStatus === "deleted"}
                       onClick={() => {
                         setRecordStatus("deleted");
                         setPage(0);
