@@ -7,6 +7,7 @@ code text NOT NULL UNIQUE,
 label text NOT NULL,
 created_at timestamp with time zone NOT NULL DEFAULT now(),
 updated_at timestamp with time zone NOT NULL DEFAULT now(),
+deleted_at timestamp with time zone,
 CONSTRAINT accreditations_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.chemistries (
@@ -15,6 +16,7 @@ slug text NOT NULL UNIQUE,
 label text NOT NULL,
 created_at timestamp with time zone NOT NULL DEFAULT now(),
 updated_at timestamp with time zone NOT NULL DEFAULT now(),
+deleted_at timestamp with time zone,
 CONSTRAINT chemistries_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.companies (
@@ -24,6 +26,7 @@ website text,
 contact_email text,
 created_at timestamp with time zone NOT NULL DEFAULT now(),
 updated_at timestamp with time zone NOT NULL DEFAULT now(),
+deleted_at timestamp with time zone,
 CONSTRAINT companies_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.facilities (
@@ -89,6 +92,7 @@ name text NOT NULL,
 country text NOT NULL DEFAULT 'IN'::text,
 created_at timestamp with time zone NOT NULL DEFAULT now(),
 updated_at timestamp with time zone NOT NULL DEFAULT now(),
+deleted_at timestamp with time zone,
 CONSTRAINT regions_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.spatial_ref_sys (

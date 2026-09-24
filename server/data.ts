@@ -18,6 +18,7 @@ export async function listRecords(
     offset: number;
     includeAllColumns?: boolean;
     search?: string;
+    status?: "active" | "deleted";
   }
 ): Promise<RecordsResponse> {
   const table = getTableOrThrow(tableName);
@@ -26,7 +27,9 @@ export async function listRecords(
   });
 
   if (hasDeletedAtColumn(table)) {
-    query = query.is("deleted_at", null);
+    query = options.status === "deleted" ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+  } else if (options.status === "deleted") {
+    throw new Error(`${table.label} does not support soft deletion.`);
   }
 
   if (options.search && table.searchableColumns.length > 0) {
@@ -117,7 +120,12 @@ function getRecordSelectColumns(table: TableMeta, includeAllColumns = false): st
 
   const columnNames = table.readOnly
     ? [...table.primaryKeys, ...table.listColumns]
-    : table.columns.filter((column) => !column.hidden).map((column) => column.name);
+    : [
+        ...table.primaryKeys,
+        ...table.columns
+          .filter((column) => !column.hidden || column.name === "deleted_at")
+          .map((column) => column.name)
+      ];
 
   return [...new Set(columnNames)].join(",");
 }
@@ -222,35 +230,52 @@ export async function deleteRecord(tableName: string, record: RecordInput): Prom
 
   const keys = extractPrimaryKeys(table, record);
 
-  if (hasDeletedAtColumn(table)) {
-    const payload: RecordInput = { deleted_at: new Date().toISOString() };
-
-    if (table.columns.some((column) => column.name === "updated_at")) {
-      payload.updated_at = new Date().toISOString();
-    }
-
-    let query = supabase.from(table.name).update(payload).select(table.primaryKeys.join(","));
-
-    for (const [column, value] of Object.entries(keys)) {
-      query = query.eq(column, value as never);
-    }
-
-    const { error } = await query.single();
-    if (error) {
-      throw new Error(error.message);
-    }
-    return;
-  }
-
-  let query = supabase.from(table.name).delete();
+  let query = supabase.from(table.name).delete().select(table.primaryKeys.join(","));
 
   for (const [column, value] of Object.entries(keys)) {
     query = query.eq(column, value as never);
   }
 
-  const { error } = await query;
+  const { error } = await query.single();
   if (error) {
+    if (error.code === "23503") {
+      throw new Error(
+        `This ${table.label.toLowerCase()} entry is referenced by other records. Soft delete it instead.`
+      );
+    }
     throw new Error(error.message);
+  }
+}
+
+export async function softDeleteRecord(tableName: string, record: RecordInput): Promise<void> {
+  await setDeletedState(tableName, record, true);
+}
+
+export async function restoreRecord(tableName: string, record: RecordInput): Promise<void> {
+  await setDeletedState(tableName, record, false);
+}
+
+async function setDeletedState(tableName: string, record: RecordInput, deleted: boolean): Promise<void> {
+  const table = getTableOrThrow(tableName);
+  if (table.readOnly || !hasDeletedAtColumn(table)) {
+    throw new Error(`${table.label} does not support soft deletion.`);
+  }
+
+  const keys = extractPrimaryKeys(table, record);
+  const now = new Date().toISOString();
+  const payload: RecordInput = { deleted_at: deleted ? now : null };
+  if (table.columns.some((column) => column.name === "updated_at")) {
+    payload.updated_at = now;
+  }
+
+  let query = supabase.from(table.name).update(payload).select(table.primaryKeys.join(","));
+  for (const [column, value] of Object.entries(keys)) {
+    query = query.eq(column, value as never);
+  }
+  query = deleted ? query.is("deleted_at", null) : query.not("deleted_at", "is", null);
+  const { error } = await query.single();
+  if (error) {
+    throw new Error(error.code === "PGRST116" ? "Record was not found in the expected view." : error.message);
   }
 }
 
@@ -999,7 +1024,7 @@ async function inferRegionIdFromAddress(address: unknown): Promise<string | null
 }
 
 async function listRegionsForInference(): Promise<Array<{ id: string; name: string }>> {
-  const { data, error } = await supabase.from("regions").select("id,name");
+  const { data, error } = await supabase.from("regions").select("id,name").is("deleted_at", null);
   if (error) {
     throw new Error(error.message);
   }
@@ -1056,6 +1081,7 @@ async function seedMissingRegion(regionName: string): Promise<{ id: string; name
     .from("regions")
     .select("id,name")
     .ilike("name", definition.name)
+    .is("deleted_at", null)
     .limit(1)
     .maybeSingle();
   if (existing.error) {

@@ -1,6 +1,6 @@
 import { Pool, type QueryResultRow } from "pg";
 
-type DbError = { message: string };
+type DbError = { message: string; code?: string };
 type QueryResult<T> = { data: T[] | null; error: DbError | null; count?: number | null };
 type MutationResult<T> = { data: T | T[] | null; error: DbError | null; count?: number | null };
 type FilterOperator = "=" | "ilike" | "in" | "is" | "not_is";
@@ -68,7 +68,13 @@ function selectList(columns: string): string {
 }
 
 function toDbError(error: unknown): DbError {
-  return { message: error instanceof Error ? error.message : "Database request failed." };
+  return {
+    message: error instanceof Error ? error.message : "Database request failed.",
+    code:
+      typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+        ? error.code
+        : undefined
+  };
 }
 
 function addWhereClause(clauses: string[], params: unknown[], filter: Filter, startIndex: number): number {
@@ -164,6 +170,7 @@ class PgQueryBuilder<T extends QueryResultRow = QueryResultRow> implements Promi
   private readonly orGroups: Filter[][] = [];
   private readonly orders: OrderSpec[] = [];
   private selectedColumns = "*";
+  private hasSelection = false;
   private countExact = false;
   private limitCount: number | null = null;
   private offsetCount: number | null = null;
@@ -177,6 +184,7 @@ class PgQueryBuilder<T extends QueryResultRow = QueryResultRow> implements Promi
 
   select(columns = "*", options?: { count?: "exact" }): this {
     this.selectedColumns = columns;
+    this.hasSelection = true;
     this.countExact = options?.count === "exact";
     return this;
   }
@@ -353,9 +361,12 @@ class PgQueryBuilder<T extends QueryResultRow = QueryResultRow> implements Promi
 
   private async executeDelete(): Promise<MutationResult<T>> {
     const where = buildWhere(this.filters, this.orGroups);
-    const sql = `delete from ${quoteIdentifier(this.table)}${where.sql}`;
-    await getPool().query(sql, where.params);
-    return { data: null, error: null };
+    const returning = this.hasSelection ? ` returning ${selectList(this.selectedColumns)}` : "";
+    const sql = `delete from ${quoteIdentifier(this.table)}${where.sql}${returning}`;
+    const result = await getPool().query<T>(sql, where.params);
+    return this.singleMode
+      ? this.toSingleResult(result.rows, null)
+      : { data: this.hasSelection ? result.rows : null, error: null };
   }
 
   private toSingleResult(rows: T[], count: number | null): MutationResult<T> {
@@ -365,7 +376,10 @@ class PgQueryBuilder<T extends QueryResultRow = QueryResultRow> implements Promi
     if (rows.length !== 1) {
       return {
         data: null,
-        error: { message: rows.length === 0 ? "No rows returned." : "Multiple rows returned." },
+        error: {
+          code: "PGRST116",
+          message: rows.length === 0 ? "No rows returned." : "Multiple rows returned."
+        },
         count
       };
     }

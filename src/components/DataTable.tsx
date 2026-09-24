@@ -11,10 +11,13 @@ export function DataTable({
   lookups,
   onDelete,
   onEdit,
+  onRestore,
+  onSoftDelete,
   page,
   pageCount,
   records,
   setPage,
+  status,
   table
 }: {
   columns: ColumnMeta[];
@@ -24,10 +27,13 @@ export function DataTable({
   lookups: LookupCache;
   onDelete: (row: RowRecord) => void;
   onEdit: (row: RowRecord) => void;
+  onRestore: (row: RowRecord) => void;
+  onSoftDelete: (row: RowRecord) => void;
   page: number;
   pageCount: number;
   records: RowRecord[];
   setPage: (updater: (value: number) => number) => void;
+  status: "active" | "deleted";
   table: TableMeta;
 }) {
   return (
@@ -76,10 +82,22 @@ export function DataTable({
                         <button onClick={() => onEdit(row)} type="button">
                           View
                         </button>
+                      ) : status === "deleted" ? (
+                        <>
+                          <button onClick={() => onRestore(row)} type="button">
+                            Restore
+                          </button>
+                          <button className="danger-link" onClick={() => onDelete(row)} type="button">
+                            Delete
+                          </button>
+                        </>
                       ) : (
                         <>
                           <button onClick={() => onEdit(row)} type="button">
                             Edit
+                          </button>
+                          <button onClick={() => onSoftDelete(row)} type="button">
+                            Soft delete
                           </button>
                           <button className="danger-link" onClick={() => onDelete(row)} type="button">
                             Delete
@@ -114,10 +132,22 @@ export function DataTable({
                   <button onClick={() => onEdit(row)} type="button">
                     View
                   </button>
+                ) : status === "deleted" ? (
+                  <>
+                    <button onClick={() => onRestore(row)} type="button">
+                      Restore
+                    </button>
+                    <button className="danger-link" onClick={() => onDelete(row)} type="button">
+                      Delete
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button onClick={() => onEdit(row)} type="button">
                       Edit
+                    </button>
+                    <button onClick={() => onSoftDelete(row)} type="button">
+                      Soft delete
                     </button>
                     <button className="danger-link" onClick={() => onDelete(row)} type="button">
                       Delete
